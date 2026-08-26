@@ -33,8 +33,6 @@ class ExecutionCommit:
     checksum: str = ""
 
     def with_integrity(self):
-        if self.checksum:
-            return self
         payload = asdict(self)
         payload.pop("checksum", None)
         raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
@@ -89,7 +87,7 @@ class ExecutionCommitCoordinator:
             return self._max_sequence_unlocked()
 
     def _append_journal_unlocked(self, commit: ExecutionCommit):
-        self._read_journal_unlocked()  # quarantine malformed records before appending
+        self._read_journal_unlocked()
         next_sequence = self._max_sequence_unlocked() + 1
         commit = ExecutionCommit(**{**asdict(commit), "sequence": next_sequence}).with_integrity()
         with self.journal_path.open("a", encoding="utf-8") as handle:
