@@ -40,12 +40,7 @@ class CorruptJournalError(ValueError):
 
 
 class ExecutionCommitCoordinator:
-    """The single lifecycle mutation boundary for durable executions.
-
-    Callers describe a transition; this coordinator owns journaling, persistence,
-    audit and recovery reconciliation. The repository remains a persistence
-    adapter and is not intended to be the lifecycle API for runtime components.
-    """
+    """The single lifecycle mutation boundary for durable executions."""
 
     def __init__(self, store: ExecutionStore, audit_log: ExecutionAuditLog, journal_path: str = "data/execution_commits.jsonl", quarantine_path: str = "data/execution_commits.quarantine.jsonl"):
         self.store = store
@@ -56,7 +51,8 @@ class ExecutionCommitCoordinator:
 
     def _append_journal(self, commit: ExecutionCommit):
         commits = self._read_journal()
-        commit = ExecutionCommit(**{**asdict(commit), "sequence": len(commits) + 1}).with_integrity()
+        next_sequence = max((c.sequence for c in commits), default=0) + 1
+        commit = ExecutionCommit(**{**asdict(commit), "sequence": next_sequence}).with_integrity()
         with self.journal_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(asdict(commit), ensure_ascii=False, default=str) + "\n")
             handle.flush()
@@ -71,23 +67,22 @@ class ExecutionCommitCoordinator:
         if not self.journal_path.exists():
             return []
         result = []
-        expected = 1
+        previous_sequence = 0
         for line in self.journal_path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             try:
                 raw = json.loads(line)
                 raw.setdefault("status", "pending")
-                raw.setdefault("sequence", expected)
+                raw.setdefault("sequence", previous_sequence + 1)
                 commit = ExecutionCommit(**raw)
-                if commit.sequence != expected or commit.with_integrity().checksum != commit.checksum:
-                    raise CorruptJournalError(f"invalid journal integrity at sequence {expected}")
+                if commit.sequence <= previous_sequence or commit.with_integrity().checksum != commit.checksum:
+                    raise CorruptJournalError(f"invalid journal integrity at sequence {commit.sequence}")
             except (json.JSONDecodeError, TypeError, KeyError, CorruptJournalError) as exc:
                 self._quarantine(line, str(exc))
-                expected += 1
                 continue
             result.append(commit)
-            expected += 1
+            previous_sequence = commit.sequence
         return result
 
     def _quarantine(self, line: str, reason: str):
