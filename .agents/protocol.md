@@ -1,11 +1,15 @@
 # Agent Operating Protocol v1.0
 
-1. Read `AGENTS.md`, `.agents/STATUS.md` and relevant skills before work.
-2. Inspect current GitHub state and ownership before editing.
-3. Research existing implementation before architectural changes.
-4. Keep ownership scoped; avoid conflicting edits.
-5. Add regression tests for contract changes.
-6. Run targeted then relevant integration/security validation.
-7. Convert reusable knowledge into skills.
-8. Update status/handoff before finishing.
-9. Commit atomic changes to GitHub; never rewrite shared history.
+Every AIOS agent MUST:
+1. Read `AGENTS.md`.
+2. Read `.agents/STATUS.md`.
+3. Check relevant skills in `.agents/skills/`.
+4. Inspect current GitHub state, open work and ownership before editing.
+5. Research existing implementation/documentation before architectural changes.
+6. Record architectural decisions in docs/ADR or a research note.
+7. Keep ownership scoped and avoid conflicting edits.
+8. Run targeted tests, then broader validation when appropriate.
+9. Convert reusable knowledge into a skill.
+10. Update status and handoff information before finishing.
+
+The repository state must be understandable to a new agent joining from another machine. Local chat history and local files are not sources of truth.
