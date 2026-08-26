@@ -19,12 +19,7 @@ class LoopResult:
 
 
 class AutonomousExecutionLoop:
-    """Run executions through the injected canonical checkpoint/commit boundary.
-
-    A persistent loop must be constructed with a checkpoint backed by an
-    ``ExecutionCommitCoordinator``.  The store-only fallback is intentionally
-    limited to ephemeral, non-persistent execution (``store is None``).
-    """
+    """Run executions through the injected canonical checkpoint/commit boundary."""
 
     def __init__(self, executor, planner, policy: Optional[ReplanningPolicy] = None, event_bus=None, store: Optional[ExecutionStore] = None, checkpoint: Optional[RecoveryCheckpoint] = None):
         self.executor = executor
@@ -56,8 +51,8 @@ class AutonomousExecutionLoop:
         if state is None:
             state = ExecutionState(execution.execution_id, status="pending", goal=goal, attempt=start_attempt, plan=plan)
             if self.store:
-                self._require_checkpoint()
-                self.checkpoint.transition(state, "pending", attempt=start_attempt, plan=plan)
+                # Initial materialization is persistence, not a lifecycle transition.
+                self.store.save(state)
 
         elif state.status not in {"running", "retrying", "pending"}:
             raise ValueError(f"execution '{state.execution_id}' cannot run from '{state.status}'")
@@ -84,10 +79,6 @@ class AutonomousExecutionLoop:
             await self._publish(REPLAN_COMPLETED, execution, {"attempt": attempt + 1, "plan": plan})
         self._checkpoint_failed(state, "maximum attempts exceeded")
         return LoopResult("failed", attempts=self.policy.max_attempts)
-
-    def _require_checkpoint(self):
-        if self.checkpoint is None:
-            raise RuntimeError("canonical checkpoint is required for persistent execution")
 
     def _transition(self, state, status, **updates):
         if self.checkpoint:
