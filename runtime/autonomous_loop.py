@@ -16,6 +16,7 @@ class LoopResult:
     status: str
     result: Any = None
     attempts: int = 0
+    execution_id: Optional[str] = None
 
 
 class AutonomousExecutionLoop:
@@ -67,18 +68,18 @@ class AutonomousExecutionLoop:
             failed = next((r for r in results if hasattr(r, "ok") and not r.ok), None)
             if failed is None:
                 state = self._checkpoint_completed(state, results)
-                return LoopResult("completed", results, attempt + 1)
+                return LoopResult("completed", results, attempt + 1, execution.execution_id)
             decision = self.policy.decide(attempt, RuntimeError(failed.error or "tool execution failed"))
             await self._publish(REPLAN_REQUESTED, execution, {"attempt": attempt, "error": failed.error})
             if not decision.retry:
                 self._checkpoint_failed(state, failed.error)
-                return LoopResult("failed", results, attempt + 1)
+                return LoopResult("failed", results, attempt + 1, execution.execution_id)
             state = self._transition(state, "retrying", attempt=attempt, error=failed.error)
             plan = await self.planner.create_plan(f"{goal} [replan attempt {attempt + 1}]")
             state = self._checkpoint_running(state, attempt + 1, plan)
             await self._publish(REPLAN_COMPLETED, execution, {"attempt": attempt + 1, "plan": plan})
         self._checkpoint_failed(state, "maximum attempts exceeded")
-        return LoopResult("failed", attempts=self.policy.max_attempts)
+        return LoopResult("failed", attempts=self.policy.max_attempts, execution_id=execution.execution_id)
 
     def _transition(self, state, status, **updates):
         if self.checkpoint:
