@@ -1,5 +1,6 @@
 """Crash-recoverable canonical execution commit protocol."""
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hashlib
@@ -9,6 +10,11 @@ from typing import Any, Optional
 
 from .execution_audit import ExecutionAuditEvent, ExecutionAuditLog
 from .execution_store import ExecutionState, ExecutionStore
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback keeps API usable.
+    fcntl = None
 
 
 @dataclass(frozen=True)
@@ -47,9 +53,22 @@ class ExecutionCommitCoordinator:
         self.audit_log = audit_log
         self.journal_path = Path(journal_path)
         self.quarantine_path = Path(quarantine_path)
+        self.lock_path = self.journal_path.with_suffix(self.journal_path.suffix + ".lock")
         self.journal_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _max_sequence(self):
+    @contextmanager
+    def _lock(self):
+        """Serialize journal read-modify-write operations across processes."""
+        with self.lock_path.open("a+", encoding="utf-8") as handle:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def _max_sequence_unlocked(self):
         if not self.journal_path.exists():
             return 0
         maximum = 0
@@ -58,28 +77,40 @@ class ExecutionCommitCoordinator:
                 continue
             try:
                 raw = json.loads(line)
-                sequence = raw.get("sequence")
-                if isinstance(sequence, int):
-                    maximum = max(maximum, sequence)
             except json.JSONDecodeError:
                 continue
+            sequence = raw.get("sequence")
+            if isinstance(sequence, int):
+                maximum = max(maximum, sequence)
         return maximum
 
-    def _append_journal(self, commit: ExecutionCommit):
-        self._read_journal()  # quarantine malformed records before appending
-        next_sequence = self._max_sequence() + 1
+    def _max_sequence(self):
+        with self._lock():
+            return self._max_sequence_unlocked()
+
+    def _append_journal_unlocked(self, commit: ExecutionCommit):
+        self._read_journal_unlocked()  # quarantine malformed records before appending
+        next_sequence = self._max_sequence_unlocked() + 1
         commit = ExecutionCommit(**{**asdict(commit), "sequence": next_sequence}).with_integrity()
         with self.journal_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(asdict(commit), ensure_ascii=False, default=str) + "\n")
             handle.flush()
         return commit
 
-    def _rewrite(self, commits):
+    def _append_journal(self, commit: ExecutionCommit):
+        with self._lock():
+            return self._append_journal_unlocked(commit)
+
+    def _rewrite_unlocked(self, commits):
         tmp = self.journal_path.with_suffix(self.journal_path.suffix + ".tmp")
         tmp.write_text("".join(json.dumps(asdict(c.with_integrity()), ensure_ascii=False, default=str) + "\n" for c in commits), encoding="utf-8")
         tmp.replace(self.journal_path)
 
-    def _read_journal(self):
+    def _rewrite(self, commits):
+        with self._lock():
+            self._rewrite_unlocked(commits)
+
+    def _read_journal_unlocked(self):
         if not self.journal_path.exists():
             return []
         result = []
@@ -101,6 +132,10 @@ class ExecutionCommitCoordinator:
             previous_sequence = commit.sequence
         return result
 
+    def _read_journal(self):
+        with self._lock():
+            return self._read_journal_unlocked()
+
     def _quarantine(self, line: str, reason: str):
         with self.quarantine_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"reason": reason, "line": line, "quarantined_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False) + "\n")
@@ -117,43 +152,52 @@ class ExecutionCommitCoordinator:
         existing = {c.commit_id: c for c in self.pending(all_statuses=True)}.get(commit_id)
         if existing:
             return existing
-        commit = self._append_journal(ExecutionCommit(commit_id, current.execution_id, current.status, to_status, current.attempt, checkpoint, reason, correlation_id=current.correlation_id))
-        self.store.transition(current.execution_id, to_status, _audit=False, **updates)
-        self.audit_log.append(ExecutionAuditEvent(current.execution_id, current.status, to_status, current.attempt, reason, correlation_id=current.correlation_id, event_id=commit_id))
-        self._mark(commit_id, "applied")
-        return commit
+        with self._lock():
+            existing = {c.commit_id: c for c in self._read_journal_unlocked() if c.commit_id == commit_id}
+            if existing:
+                return next(iter(existing.values()))
+            commit = self._append_journal_unlocked(ExecutionCommit(commit_id, current.execution_id, current.status, to_status, current.attempt, checkpoint, reason, correlation_id=current.correlation_id))
+            self.store.transition(current.execution_id, to_status, _audit=False, **updates)
+            self.audit_log.append(ExecutionAuditEvent(current.execution_id, current.status, to_status, current.attempt, reason, correlation_id=current.correlation_id, event_id=commit_id))
+            self._mark_unlocked(commit_id, "applied")
+            return commit
 
-    def _mark(self, commit_id: str, status: str):
-        commits = self._read_journal()
+    def _mark_unlocked(self, commit_id: str, status: str):
+        commits = self._read_journal_unlocked()
         for i, commit in enumerate(commits):
             if commit.commit_id == commit_id:
                 commits[i] = ExecutionCommit(**{**asdict(commit), "status": status}).with_integrity()
                 break
-        self._rewrite(commits)
+        self._rewrite_unlocked(commits)
+
+    def _mark(self, commit_id: str, status: str):
+        with self._lock():
+            self._mark_unlocked(commit_id, status)
 
     def reconcile(self):
         repaired = []
-        for commit in self.pending():
-            state = self.store.get(commit.execution_id)
-            if not state:
-                continue
-            if state.status == commit.to_status:
+        with self._lock():
+            for commit in [c for c in self._read_journal_unlocked() if c.status == "pending"]:
+                state = self.store.get(commit.execution_id)
+                if not state:
+                    continue
+                if state.status == commit.to_status:
+                    self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id))
+                    self._mark_unlocked(commit.commit_id, "reconciled")
+                    repaired.append(commit.commit_id)
+                    continue
+                if state.status != commit.from_status:
+                    continue
+                updates = {}
+                if commit.to_status == "completed":
+                    updates["result"] = commit.checkpoint
+                    updates["error"] = None
+                elif commit.to_status == "failed":
+                    updates["error"] = commit.reason
+                self.store.transition(commit.execution_id, commit.to_status, _audit=False, **updates)
                 self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id))
-                self._mark(commit.commit_id, "reconciled")
+                self._mark_unlocked(commit.commit_id, "reconciled")
                 repaired.append(commit.commit_id)
-                continue
-            if state.status != commit.from_status:
-                continue
-            updates = {}
-            if commit.to_status == "completed":
-                updates["result"] = commit.checkpoint
-                updates["error"] = None
-            elif commit.to_status == "failed":
-                updates["error"] = commit.reason
-            self.store.transition(commit.execution_id, commit.to_status, _audit=False, **updates)
-            self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id))
-            self._mark(commit.commit_id, "reconciled")
-            repaired.append(commit.commit_id)
         return repaired
 
     def pending(self, all_statuses=False):
