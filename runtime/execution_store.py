@@ -92,8 +92,10 @@ class ExecutionStore:
                 if status != "pending":
                     raise KeyError(execution_id)
                 state = ExecutionState(execution_id=execution_id)
+                old_status = None
             else:
                 state = ExecutionState(**raw)
+                old_status = state.status
             self.state_machine.validate(state.status, status)
             state.status = status
             for key, value in updates.items():
@@ -101,8 +103,8 @@ class ExecutionStore:
             state.updated_at = datetime.now(timezone.utc).isoformat()
             data[state.execution_id] = asdict(state)
             self._write(data)
-        if _audit and self.audit_log:
-            self.audit_log.append(ExecutionAuditEvent(state.execution_id, state.status if status == "pending" else "", status, state.attempt, state.error, correlation_id=state.correlation_id))
+        if _audit and self.audit_log and old_status != status:
+            self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", status, state.attempt, state.error, correlation_id=state.correlation_id))
         return state
 
     def get(self, execution_id: str) -> Optional[ExecutionState]:
