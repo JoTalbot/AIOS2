@@ -1,4 +1,4 @@
-"""Bounded autonomous execution loop with restart-safe, validated persistence."""
+"""Bounded autonomous execution loop with restart-safe canonical persistence."""
 
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -48,59 +48,68 @@ class AutonomousExecutionLoop:
             state = ExecutionState(execution.execution_id, status="pending", goal=goal, attempt=start_attempt, plan=plan)
             if self.store:
                 self.store.save(state)
-        elif state.status == "retrying":
-            self._transition(state, "running", attempt=start_attempt, plan=plan)
-        elif state.status == "pending":
-            self._transition(state, "running", attempt=start_attempt, plan=plan)
-        elif state.status != "running":
+        elif state.status not in {"running", "retrying", "pending"}:
             raise ValueError(f"execution '{state.execution_id}' cannot run from '{state.status}'")
 
+        if state.status in {"pending", "retrying"}:
+            state = self._checkpoint_running(state, start_attempt, plan)
+
         for attempt in range(start_attempt, self.policy.max_attempts):
-            self._checkpoint_running(state, attempt, plan)
+            if state.attempt != attempt or state.plan != plan:
+                state = self._checkpoint_running(state, attempt, plan)
             results = await self.executor.execute(agent, plan, context, execution)
             failed = next((r for r in results if hasattr(r, "ok") and not r.ok), None)
             if failed is None:
-                self._checkpoint_completed(state, results)
+                state = self._checkpoint_completed(state, results)
                 return LoopResult("completed", results, attempt + 1)
             decision = self.policy.decide(attempt, RuntimeError(failed.error or "tool execution failed"))
             await self._publish(REPLAN_REQUESTED, execution, {"attempt": attempt, "error": failed.error})
             if not decision.retry:
                 self._checkpoint_failed(state, failed.error)
                 return LoopResult("failed", results, attempt + 1)
-            self._transition(state, "retrying", attempt=attempt, error=failed.error)
+            state = self._transition(state, "retrying", attempt=attempt, error=failed.error)
             plan = await self.planner.create_plan(f"{goal} [replan attempt {attempt + 1}]")
-            self._transition(state, "running", attempt=attempt + 1, plan=plan, error=None)
+            state = self._checkpoint_running(state, attempt + 1, plan)
             await self._publish(REPLAN_COMPLETED, execution, {"attempt": attempt + 1, "plan": plan})
         self._checkpoint_failed(state, "maximum attempts exceeded")
         return LoopResult("failed", attempts=self.policy.max_attempts)
 
     def _transition(self, state, status, **updates):
+        if self.checkpoint:
+            return self.checkpoint.transition(state, status, **updates)
         state.status = status
         for key, value in updates.items():
             setattr(state, key, value)
         if self.store:
-            self.store.save(state)
+            return self.store.save(state)
+        return state
 
     def _checkpoint_running(self, state, attempt, plan):
-        state.attempt, state.plan = attempt, plan
         if self.checkpoint:
-            self.checkpoint.mark_running(state, attempt, plan)
-        elif self.store:
-            self.store.save(state)
+            result = self.checkpoint.mark_running(state, attempt, plan)
+            return self.store.get(state.execution_id) if self.store else state
+        state.status, state.attempt, state.plan = "running", attempt, plan
+        if self.store:
+            return self.store.save(state)
+        return state
 
     def _checkpoint_completed(self, state, result):
         if self.checkpoint:
             self.checkpoint.mark_completed(state, result)
-        elif self.store:
-            state.status, state.result, state.error = "completed", result, None
-            self.store.save(state)
+            return self.store.get(state.execution_id) if self.store else state
+        state.status, state.result, state.error = "completed", result, None
+        if self.store:
+            return self.store.save(state)
+        return state
 
     def _checkpoint_failed(self, state, error):
         if self.checkpoint:
             self.checkpoint.mark_failed(state, error)
-        elif self.store:
-            state.status, state.error = "failed", str(error)
-            self.store.save(state)
+            return self.store.get(state.execution_id) if self.store else state
+        state.status, state.error = "failed", str(error)
+        if self.store:
+            return self.store.save(state)
+        return state
 
     async def _publish(self, event_type, context, data):
         if self.event_bus:
