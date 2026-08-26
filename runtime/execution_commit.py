@@ -1,4 +1,4 @@
-"""Crash-recoverable execution commit protocol with an integrity-protected journal."""
+"""Crash-recoverable canonical execution commit protocol."""
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -40,7 +40,12 @@ class CorruptJournalError(ValueError):
 
 
 class ExecutionCommitCoordinator:
-    """Durable journal with explicit status, sequence and checksum validation."""
+    """The single lifecycle mutation boundary for durable executions.
+
+    Callers describe a transition; this coordinator owns journaling, persistence,
+    audit and recovery reconciliation. The repository remains a persistence
+    adapter and is not intended to be the lifecycle API for runtime components.
+    """
 
     def __init__(self, store: ExecutionStore, audit_log: ExecutionAuditLog, journal_path: str = "data/execution_commits.jsonl", quarantine_path: str = "data/execution_commits.quarantine.jsonl"):
         self.store = store
@@ -89,14 +94,20 @@ class ExecutionCommitCoordinator:
         with self.quarantine_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"reason": reason, "line": line, "quarantined_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False) + "\n")
 
-    def commit(self, state: ExecutionState, to_status: str, *, checkpoint=None, reason=None):
+    def commit(self, state: ExecutionState, to_status: str, *, checkpoint=None, reason=None, updates=None):
+        """Commit one validated lifecycle transition and its associated snapshot fields."""
         current = self.store.get(state.execution_id) or state
-        commit_id = f"{current.execution_id}:{current.attempt}:{to_status}:{current.correlation_id or ''}"
+        updates = dict(updates or {})
+        if to_status == "completed" and checkpoint is not None:
+            updates.setdefault("result", checkpoint)
+        if to_status == "failed" and reason is not None:
+            updates.setdefault("error", reason)
+        commit_id = f"{current.execution_id}:{current.attempt}:{current.status}:{to_status}:{current.correlation_id or ''}"
         existing = {c.commit_id: c for c in self.pending(all_statuses=True)}.get(commit_id)
         if existing:
             return existing
         commit = self._append_journal(ExecutionCommit(commit_id, current.execution_id, current.status, to_status, current.attempt, checkpoint, reason, correlation_id=current.correlation_id))
-        self.store.transition(current.execution_id, to_status, result=checkpoint if to_status == "completed" else current.result, error=reason if to_status == "failed" else current.error)
+        self.store.transition(current.execution_id, to_status, _audit=False, **updates)
         self.audit_log.append(ExecutionAuditEvent(current.execution_id, current.status, to_status, current.attempt, reason, correlation_id=current.correlation_id, event_id=commit_id))
         self._mark(commit_id, "applied")
         return commit
@@ -122,7 +133,13 @@ class ExecutionCommitCoordinator:
                 continue
             if state.status != commit.from_status:
                 continue
-            self.store.transition(commit.execution_id, commit.to_status, result=commit.checkpoint if commit.to_status == "completed" else state.result, error=commit.reason if commit.to_status == "failed" else state.error)
+            updates = {}
+            if commit.to_status == "completed":
+                updates["result"] = commit.checkpoint
+                updates["error"] = None
+            elif commit.to_status == "failed":
+                updates["error"] = commit.reason
+            self.store.transition(commit.execution_id, commit.to_status, _audit=False, **updates)
             self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id))
             self._mark(commit.commit_id, "reconciled")
             repaired.append(commit.commit_id)
