@@ -1,5 +1,6 @@
 """Persistent execution state backed by a domain state machine."""
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
@@ -8,6 +9,11 @@ from typing import Any, Dict, Optional
 
 from .execution_audit import ExecutionAuditEvent, ExecutionAuditLog
 from .execution_state_machine import ExecutionStateMachine
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback keeps API usable.
+    fcntl = None
 
 
 @dataclass
@@ -27,18 +33,31 @@ class ExecutionStore:
     """Durable repository for execution snapshots.
 
     Lifecycle orchestration should use ``ExecutionCommitCoordinator``. ``save``
-    remains public for snapshot creation/backward compatibility, while lifecycle
-    transitions can suppress the repository-level audit hook so the coordinator
-    can provide exactly one canonical audit event.
+    remains available for initial snapshot creation and compatibility, while
+    lifecycle transitions can suppress the repository-level audit hook so the
+    coordinator provides exactly one canonical audit event.
     """
 
     def __init__(self, path: str = "data/executions.json", state_machine: Optional[ExecutionStateMachine] = None, audit_log: Optional[ExecutionAuditLog] = None):
         self.path = Path(path)
+        self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.state_machine = state_machine or ExecutionStateMachine()
         self.audit_log = audit_log
         if not self.path.exists():
             self._write({})
+
+    @contextmanager
+    def _lock(self):
+        """Serialize execution snapshot read-modify-write operations."""
+        with self.lock_path.open("a+", encoding="utf-8") as handle:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def _read(self) -> Dict[str, Any]:
         try:
@@ -52,33 +71,46 @@ class ExecutionStore:
         tmp.replace(self.path)
 
     def save(self, state: ExecutionState, *, _audit: bool = True) -> ExecutionState:
-        data = self._read()
-        previous = data.get(state.execution_id)
-        if previous:
-            self.state_machine.validate(previous.get("status", "pending"), state.status)
-        old_status = previous.get("status", "pending") if previous else None
-        state.updated_at = datetime.now(timezone.utc).isoformat()
-        data[state.execution_id] = asdict(state)
-        self._write(data)
+        with self._lock():
+            data = self._read()
+            previous = data.get(state.execution_id)
+            if previous:
+                self.state_machine.validate(previous.get("status", "pending"), state.status)
+            old_status = previous.get("status", "pending") if previous else None
+            state.updated_at = datetime.now(timezone.utc).isoformat()
+            data[state.execution_id] = asdict(state)
+            self._write(data)
         if _audit and self.audit_log and old_status != state.status:
             self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", state.status, state.attempt, state.error, correlation_id=state.correlation_id))
         return state
 
     def transition(self, execution_id: str, status: str, *, _audit: bool = True, **updates) -> ExecutionState:
-        state = self.get(execution_id)
-        if not state:
-            if status != "pending":
-                raise KeyError(execution_id)
-            state = ExecutionState(execution_id=execution_id)
-        self.state_machine.validate(state.status, status)
-        state.status = status
-        for key, value in updates.items():
-            setattr(state, key, value)
-        return self.save(state, _audit=_audit)
+        with self._lock():
+            data = self._read()
+            raw = data.get(execution_id)
+            if not raw:
+                if status != "pending":
+                    raise KeyError(execution_id)
+                state = ExecutionState(execution_id=execution_id)
+            else:
+                state = ExecutionState(**raw)
+            self.state_machine.validate(state.status, status)
+            state.status = status
+            for key, value in updates.items():
+                setattr(state, key, value)
+            state.updated_at = datetime.now(timezone.utc).isoformat()
+            data[state.execution_id] = asdict(state)
+            self._write(data)
+        if _audit and self.audit_log:
+            self.audit_log.append(ExecutionAuditEvent(state.execution_id, state.status if status == "pending" else "", status, state.attempt, state.error, correlation_id=state.correlation_id))
+        return state
 
     def get(self, execution_id: str) -> Optional[ExecutionState]:
-        raw = self._read().get(execution_id)
+        with self._lock():
+            raw = self._read().get(execution_id)
         return ExecutionState(**raw) if raw else None
 
     def resumable(self):
-        return [ExecutionState(**raw) for raw in self._read().values() if raw.get("status") in {"running", "retrying"}]
+        with self._lock():
+            values = list(self._read().values())
+        return [ExecutionState(**raw) for raw in values if raw.get("status") in {"running", "retrying"}]
