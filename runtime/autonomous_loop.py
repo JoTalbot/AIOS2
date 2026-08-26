@@ -19,13 +19,22 @@ class LoopResult:
 
 
 class AutonomousExecutionLoop:
+    """Run executions through the injected canonical checkpoint/commit boundary.
+
+    A persistent loop must be constructed with a checkpoint backed by an
+    ``ExecutionCommitCoordinator``.  The store-only fallback is intentionally
+    limited to ephemeral, non-persistent execution (``store is None``).
+    """
+
     def __init__(self, executor, planner, policy: Optional[ReplanningPolicy] = None, event_bus=None, store: Optional[ExecutionStore] = None, checkpoint: Optional[RecoveryCheckpoint] = None):
         self.executor = executor
         self.planner = planner
         self.policy = policy or ReplanningPolicy()
         self.event_bus = event_bus
         self.store = store
-        self.checkpoint = checkpoint or (RecoveryCheckpoint(store) if store else None)
+        if store is not None and checkpoint is None:
+            raise ValueError("persistent execution requires a canonical checkpoint/commit coordinator")
+        self.checkpoint = checkpoint
 
     async def run(self, goal: str, agent: Any, context: Optional[dict] = None, execution_context: Optional[ExecutionContext] = None):
         context = dict(context or {})
@@ -47,7 +56,9 @@ class AutonomousExecutionLoop:
         if state is None:
             state = ExecutionState(execution.execution_id, status="pending", goal=goal, attempt=start_attempt, plan=plan)
             if self.store:
-                self.store.save(state)
+                self._require_checkpoint()
+                self.checkpoint.transition(state, "pending", attempt=start_attempt, plan=plan)
+
         elif state.status not in {"running", "retrying", "pending"}:
             raise ValueError(f"execution '{state.execution_id}' cannot run from '{state.status}'")
 
@@ -74,23 +85,23 @@ class AutonomousExecutionLoop:
         self._checkpoint_failed(state, "maximum attempts exceeded")
         return LoopResult("failed", attempts=self.policy.max_attempts)
 
+    def _require_checkpoint(self):
+        if self.checkpoint is None:
+            raise RuntimeError("canonical checkpoint is required for persistent execution")
+
     def _transition(self, state, status, **updates):
         if self.checkpoint:
             return self.checkpoint.transition(state, status, **updates)
         state.status = status
         for key, value in updates.items():
             setattr(state, key, value)
-        if self.store:
-            return self.store.save(state)
         return state
 
     def _checkpoint_running(self, state, attempt, plan):
         if self.checkpoint:
             result = self.checkpoint.mark_running(state, attempt, plan)
-            return self.store.get(state.execution_id) if self.store else state
+            return self.store.get(state.execution_id) if self.store else result
         state.status, state.attempt, state.plan = "running", attempt, plan
-        if self.store:
-            return self.store.save(state)
         return state
 
     def _checkpoint_completed(self, state, result):
@@ -98,8 +109,6 @@ class AutonomousExecutionLoop:
             self.checkpoint.mark_completed(state, result)
             return self.store.get(state.execution_id) if self.store else state
         state.status, state.result, state.error = "completed", result, None
-        if self.store:
-            return self.store.save(state)
         return state
 
     def _checkpoint_failed(self, state, error):
@@ -107,8 +116,6 @@ class AutonomousExecutionLoop:
             self.checkpoint.mark_failed(state, error)
             return self.store.get(state.execution_id) if self.store else state
         state.status, state.error = "failed", str(error)
-        if self.store:
-            return self.store.save(state)
         return state
 
     async def _publish(self, event_type, context, data):
