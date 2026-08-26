@@ -1,4 +1,4 @@
-"""Persistent execution state backed by a domain state machine and audit log."""
+"""Persistent execution state backed by a domain state machine."""
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -24,7 +24,13 @@ class ExecutionState:
 
 
 class ExecutionStore:
-    """Small atomic JSON store delegating lifecycle rules to the domain machine."""
+    """Durable repository for execution snapshots.
+
+    Lifecycle orchestration should use ``ExecutionCommitCoordinator``. ``save``
+    remains public for snapshot creation/backward compatibility, while lifecycle
+    transitions can suppress the repository-level audit hook so the coordinator
+    can provide exactly one canonical audit event.
+    """
 
     def __init__(self, path: str = "data/executions.json", state_machine: Optional[ExecutionStateMachine] = None, audit_log: Optional[ExecutionAuditLog] = None):
         self.path = Path(path)
@@ -45,7 +51,7 @@ class ExecutionStore:
         tmp.write_text(json.dumps(data, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
         tmp.replace(self.path)
 
-    def save(self, state: ExecutionState) -> ExecutionState:
+    def save(self, state: ExecutionState, *, _audit: bool = True) -> ExecutionState:
         data = self._read()
         previous = data.get(state.execution_id)
         if previous:
@@ -54,11 +60,11 @@ class ExecutionStore:
         state.updated_at = datetime.now(timezone.utc).isoformat()
         data[state.execution_id] = asdict(state)
         self._write(data)
-        if self.audit_log and old_status != state.status:
+        if _audit and self.audit_log and old_status != state.status:
             self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", state.status, state.attempt, state.error, correlation_id=state.correlation_id))
         return state
 
-    def transition(self, execution_id: str, status: str, **updates) -> ExecutionState:
+    def transition(self, execution_id: str, status: str, *, _audit: bool = True, **updates) -> ExecutionState:
         state = self.get(execution_id)
         if not state:
             if status != "pending":
@@ -68,7 +74,7 @@ class ExecutionStore:
         state.status = status
         for key, value in updates.items():
             setattr(state, key, value)
-        return self.save(state)
+        return self.save(state, _audit=_audit)
 
     def get(self, execution_id: str) -> Optional[ExecutionState]:
         raw = self._read().get(execution_id)
