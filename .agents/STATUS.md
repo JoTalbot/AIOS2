@@ -16,10 +16,11 @@
 - Mapped execution lifecycle, persistence, journal, audit, lease and recovery boundaries.
 - Added the canonical execution invariants contract in `docs/EXECUTION_INVARIANTS.md`.
 - Routed autonomous-loop lifecycle checkpoints through `ExecutionCommitCoordinator`.
-- Routed recovery failure mutations through the same coordinator.
+- Routed recovery failure mutations through the same coordinator; direct recovery failure persistence is no longer supported.
 - Shared one coordinator through `RuntimeOrchestrator` and `RuntimeFactory`.
 - Added process-level file locking to the file-backed lease adapter.
 - Hardened journal sequence allocation across quarantined/corrupt records.
+- Fixed journal checksum recomputation when commit status changes from `pending` to `applied`/`reconciled`.
 - Added regression tests for canonical audit, reconciliation idempotency, journal integrity and lease ownership.
 - Enforced that persistent `AutonomousExecutionLoop` instances receive an explicit checkpoint/commit boundary.
 - Exposed canonical `execution_id` on `LoopResult` for control-plane correlation.
@@ -33,6 +34,7 @@
 - Agent → Tool Registry → Permission Boundary → Tool Executor.
 - Recovery: Bootstrap → Policy / Queue → Lease → Resume.
 - Persistence adapters remain replaceable behind runtime boundaries.
+- Journal integrity is enforced on every record rewrite, including lifecycle status changes.
 
 ## Next actions
 1. Run the complete test suite and targeted recovery/concurrency tests in CI.
