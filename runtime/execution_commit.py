@@ -49,9 +49,25 @@ class ExecutionCommitCoordinator:
         self.quarantine_path = Path(quarantine_path)
         self.journal_path.parent.mkdir(parents=True, exist_ok=True)
 
+    def _max_sequence(self):
+        if not self.journal_path.exists():
+            return 0
+        maximum = 0
+        for line in self.journal_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                raw = json.loads(line)
+                sequence = raw.get("sequence")
+                if isinstance(sequence, int):
+                    maximum = max(maximum, sequence)
+            except json.JSONDecodeError:
+                continue
+        return maximum
+
     def _append_journal(self, commit: ExecutionCommit):
-        commits = self._read_journal()
-        next_sequence = max((c.sequence for c in commits), default=0) + 1
+        self._read_journal()  # quarantine malformed records before appending
+        next_sequence = self._max_sequence() + 1
         commit = ExecutionCommit(**{**asdict(commit), "sequence": next_sequence}).with_integrity()
         with self.journal_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(asdict(commit), ensure_ascii=False, default=str) + "\n")
