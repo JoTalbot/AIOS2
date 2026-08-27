@@ -2,8 +2,9 @@
 
 ## Current phase
 - Phase: isolated new architecture hardening and integration
-- Branch: `main`
-- Latest integrated commit: `16327541969a6a121e1c99760216e41050b9dfae`
+- Branch: `batch7E/recovery-outcome-rebased` (PR preparation)
+- Latest integrated main commit: `6114933099bca2b6096e15a4155548b4b5a6da4e`
+- Current batch commit: `fefb10f662bb61bcb63ba17ce91c320e10450d0b`
 
 ## Active agents
 
@@ -18,7 +19,8 @@
 | batch/recovery-lease-integration | Lease-aware startup recovery | merged via PR #13 | completed |
 | batch/checkpoint-contracts | Lease-aware checkpoint input contracts | merged via PR #14 | completed |
 | batch7/lease-sync | Multi-process lease synchronization | merged via PR #23 | completed |
-| batch7/observability | Structured recovery outcome | PR #24 | open / pending merge | 
+| batch7/observability | Structured recovery outcome | PR #24 | superseded by rebased batch |
+| batch7E/recovery-outcome-rebased | Harden stable recovery outcome contract | current branch | in PR preparation |
 | batch7C-7F | Readiness/bootstrap/renewal/recovery HTTP | next | planned |
 
 ## Completed
@@ -31,23 +33,23 @@
 - Integrated optional per-execution leases into recovery with safe release on success/failure.
 - Hardened lease-aware checkpoint contracts for execution identity, attempt number and failure error.
 - Added multi-process synchronization for file-backed execution leases.
-- Added structured recovery outcome work in PR #24.
-- Added a repository-wide pytest GitHub Actions workflow (`.github/workflows/tests.yml`) so the full test suite runs on pushes and pull requests.
+- Added full pytest GitHub Actions workflow.
+- Rebased the structured recovery outcome work onto current `main` and added strict boundary validation tests.
 
 ## Current architecture work
 - vNext orchestration/execution path.
 - Agent → Tool Registry → Permission Boundary → Tool Executor.
 - Persistence, checkpoint, recovery, leases and audit contracts.
-- CI now has a full pytest workflow in addition to the security regression workflow.
+- CI has a full pytest workflow in addition to the security regression workflow.
 
 ## Validation
-- Security workflow is present and has passed on recent commits.
-- Full pytest workflow has just been added; its first run should be used as the baseline for the entire repository test suite.
-- PR #23 merged successfully; PR #24 remains open until its branch is synchronized and validated.
+- New recovery outcome tests are committed on the rebased branch.
+- No workflow run is exposed yet for the latest branch commit; CI validation remains pending after PR creation.
+- PR #24 is divergent from current `main` and should not move `main` backwards; this branch supersedes it with the same feature rebased onto current `main`.
 
 ## Next actions
-1. Let the new full pytest workflow establish the repository-wide baseline and fix failures in batches.
-2. Merge/synchronize PR #24 without moving `main` backwards.
+1. Open a replacement PR from the rebased recovery-outcome branch.
+2. Use CI as the repository-wide pytest baseline and fix failures in batches.
 3. Audit recovery HTTP and runtime bootstrap paths for fail-closed/contract-hardening gaps.
 4. Audit lease renewal/release for stale-owner behavior and monotonic ownership semantics.
 5. Continue parallel development through isolated branches/PRs and update this status after each significant batch.
