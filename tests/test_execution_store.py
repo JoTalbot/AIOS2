@@ -21,9 +21,10 @@ def test_execution_store_updates_status_and_increments_version(tmp_path):
     store = ExecutionStore(str(tmp_path / "executions.json"))
     store.save(ExecutionState("exec-2"))
     initial = store.get("exec-2")
-    updated = store.transition("exec-2", "completed", expected_version=initial.version)
+    running = store.transition("exec-2", "running", expected_version=initial.version)
+    updated = store.transition("exec-2", "completed", expected_version=running.version)
     assert updated.status == "completed"
-    assert updated.version == initial.version + 1
+    assert updated.version == initial.version + 2
     assert store.resumable() == []
 
 
