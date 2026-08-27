@@ -73,7 +73,9 @@ class ToolExecutor:
         if self.idempotency_store:
             stored = self.idempotency_store.get(intent.idempotency_key)
             if stored:
-                if self.intent_store and intent.state in {"ambiguous", "executing"}: self.intent_store.mark(intent.idempotency_key, "completed")
+                current = self.intent_store.get(intent.idempotency_key) if self.intent_store else None
+                if self.intent_store and current and current.state in {"ambiguous", "executing"}:
+                    self.intent_store.mark(intent.idempotency_key, "completed")
                 return ToolResult(intent.call_id, intent.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
         result = resolver(intent)
         if hasattr(result, "__await__"): result = await result
@@ -81,7 +83,10 @@ class ToolExecutor:
         if not isinstance(result, ToolResult): raise TypeError("resolver must return ToolResult or None")
         if result.ok:
             if self.idempotency_store: self.idempotency_store.put_if_absent(StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, True, result.value))
-            if self.intent_store and intent.state in {"ambiguous", "executing"}: self.intent_store.mark(intent.idempotency_key, "completed")
+            if self.intent_store:
+                current = self.intent_store.get(intent.idempotency_key)
+                if current and current.state in {"ambiguous", "executing"}:
+                    self.intent_store.mark(intent.idempotency_key, "completed")
         return result
 
     async def _execute_once(self, call: ToolCall, context: ToolExecutionContext, execution_context: ExecutionContext | None = None) -> ToolResult:
