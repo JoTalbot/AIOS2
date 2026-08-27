@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .execution_audit import ExecutionAuditEvent, ExecutionAuditLog
-from .execution_context import ExecutionContext
+from .execution_audit import ExecutionAuditEvent
 from .execution_state_machine import ExecutionStateMachine
+from .tool_protocol import ToolResult
 
 try:
     import fcntl
@@ -61,6 +61,17 @@ class ExecutionStore:
         value=raw.get("version",0)
         if not isinstance(value,int) or value<0: raise ExecutionStoreCorruptionError("execution state has invalid version")
         return value
+    @staticmethod
+    def _decode_value(value):
+        if isinstance(value, list): return [ExecutionStore._decode_value(item) for item in value]
+        if isinstance(value, dict):
+            if {"call_id", "tool", "ok"}.issubset(value):
+                try:
+                    return ToolResult(value["call_id"], value["tool"], bool(value["ok"]), ExecutionStore._decode_value(value.get("value")), value.get("error"), bool(value.get("retryable", False)), value.get("idempotency_key"))
+                except Exception:
+                    pass
+            return {key: ExecutionStore._decode_value(item) for key, item in value.items()}
+        return value
     def save(self,state): return self._save(state,None)
     def compare_and_set(self,state,expected_version):
         if not isinstance(expected_version,int) or expected_version<0: raise ValueError("expected_version must be a non-negative integer")
@@ -70,11 +81,7 @@ class ExecutionStore:
         with _FileLock(self.lock_path):
             data=self._read_unlocked(); previous=data.get(state.execution_id); current_version=self._version(previous)
             if expected_version is not None and current_version!=expected_version: raise ExecutionVersionConflictError(f"execution '{state.execution_id}' version changed: expected {expected_version}, found {current_version}")
-            # ``save`` historically accepted a fresh state object as a complete
-            # replacement. Keep that compatibility path, while all versioned/CAS
-            # updates remain governed by the lifecycle state machine.
-            if previous and not (expected_version is None and getattr(state, "version", 0) == 0):
-                self.state_machine.validate(previous.get("status","pending"),state.status)
+            if previous and not (expected_version is None and getattr(state, "version", 0) == 0): self.state_machine.validate(previous.get("status","pending"),state.status)
             old_status=previous.get("status","pending") if previous else None; state.version=current_version+1; state.updated_at=datetime.now(timezone.utc).isoformat(); data[state.execution_id]=asdict(state); self._write(data)
         if self.audit_log and old_status!=state.status: self.audit_log.append(ExecutionAuditEvent(state.execution_id,old_status or "new",state.status,state.attempt,state.error,correlation_id=state.correlation_id))
         return state
@@ -88,7 +95,8 @@ class ExecutionStore:
         return self.save(state)
     def get(self,execution_id):
         with _FileLock(self.lock_path): raw=self._read_unlocked().get(execution_id)
-        return ExecutionState(**raw) if raw else None
+        if not raw:return None
+        raw=dict(raw); raw["result"]=self._decode_value(raw.get("result")); return ExecutionState(**raw)
     def resumable(self):
         with _FileLock(self.lock_path): values=list(self._read_unlocked().values())
-        return [ExecutionState(**raw) for raw in values if raw.get("status") in {"running", "retrying"} or (raw.get("status") == "pending" and raw.get("attempt", 0) > 0)]
+        return [ExecutionState(**{**raw,"result":self._decode_value(raw.get("result"))}) for raw in values if raw.get("status") in {"running", "retrying"} or (raw.get("status") == "pending" and raw.get("attempt", 0) > 0)]
