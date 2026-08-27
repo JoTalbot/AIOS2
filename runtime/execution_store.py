@@ -62,6 +62,10 @@ class ExecutionStore:
                 except Exception:pass
             return {k:ExecutionStore._decode_value(v) for k,v in value.items()}
         return value
+    def _decode_state(self,raw):
+        if not raw:return None
+        value=dict(raw);value["result"]=self._decode_value(value.get("result"));return ExecutionState(**value)
+    def _get_unlocked(self,execution_id): return self._decode_state(self._read_unlocked().get(execution_id))
     def save(self,state):return self._save(state,None,validate_transition=False)
     def compare_and_set(self,state,expected_version,*,expected_status=None,fencing_token=None,fencing_validator=None,lock_held=False):
         if not isinstance(expected_version,int) or expected_version<0:raise ValueError("expected_version must be a non-negative integer")
@@ -88,9 +92,7 @@ class ExecutionStore:
         for key,value in updates.items():setattr(state,key,value)
         return self.compare_and_set(state,state.version)
     def get(self,execution_id):
-        with _FileLock(self.lock_path):raw=self._read_unlocked().get(execution_id)
-        if not raw:return None
-        raw=dict(raw);raw["result"]=self._decode_value(raw.get("result"));return ExecutionState(**raw)
+        with _FileLock(self.lock_path):return self._get_unlocked(execution_id)
     def resumable(self):
         with _FileLock(self.lock_path):values=list(self._read_unlocked().values())
         return [ExecutionState(**{**raw,"result":self._decode_value(raw.get("result"))}) for raw in values if raw.get("status") in {"running","retrying"} or (raw.get("status")=="pending" and raw.get("attempt",0)>0)]
