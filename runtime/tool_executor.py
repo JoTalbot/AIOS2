@@ -39,8 +39,6 @@ class ToolExecutor:
                         result = ToolResult(call.call_id, call.tool, stored.ok, stored.value,
                                             stored.error, False, stored.idempotency_key)
                         self._idempotent_results[key] = result
-                        if self.intent_store:
-                            self.intent_store.mark(key, "completed")
                         return result
                 if self.intent_store:
                     intent = self.intent_store.prepare(ToolIntent(
@@ -65,8 +63,6 @@ class ToolExecutor:
                         self.intent_store.mark(key, "completed")
                     self._idempotent_results[key] = result
                 elif self.intent_store:
-                    # A tool may have committed an external side effect before raising.
-                    # Never silently classify that outcome as safe to retry.
                     self.intent_store.mark(key, "ambiguous")
                 return result
         return await self._execute_once(call, context, execution_context)
@@ -74,18 +70,14 @@ class ToolExecutor:
     async def reconcile_intent(self, intent: ToolIntent, resolver):
         """Resolve an ambiguous operation without replaying its side effect.
 
-        ``resolver`` must query the external system by idempotency key and return
-        a ToolResult, ``None`` when the operation is not known, or an awaitable of
-        either value. Unknown operations remain ambiguous by design.
+        Terminal intent transitions belong to the recovery worker, which owns the
+        fencing token. This method only resolves and persists the idempotent result.
         """
         if self.idempotency_store:
             stored = self.idempotency_store.get(intent.idempotency_key)
             if stored:
-                result = ToolResult(intent.call_id, intent.tool, stored.ok, stored.value,
-                                    stored.error, False, stored.idempotency_key)
-                if self.intent_store:
-                    self.intent_store.mark(intent.idempotency_key, "completed")
-                return result
+                return ToolResult(intent.call_id, intent.tool, stored.ok, stored.value,
+                                  stored.error, False, stored.idempotency_key)
         result = resolver(intent)
         if hasattr(result, "__await__"):
             result = await result
@@ -96,8 +88,6 @@ class ToolExecutor:
         if result.ok and self.idempotency_store:
             self.idempotency_store.put_if_absent(
                 StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, True, result.value))
-        if self.intent_store:
-            self.intent_store.mark(intent.idempotency_key, "completed" if result.ok else "failed")
         return result
 
     async def _execute_once(self, call: ToolCall, context: ToolExecutionContext,
