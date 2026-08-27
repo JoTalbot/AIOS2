@@ -36,6 +36,10 @@ class ExecutionLeaseStore:
             tmp.write_text(json.dumps(data,indent=2,sort_keys=True),encoding="utf-8")
             with tmp.open("r+",encoding="utf-8") as h:h.flush();os.fsync(h.fileno())
             tmp.replace(self.path)
+            if os.name != "nt":
+                dir_fd=os.open(str(self.path.parent), os.O_RDONLY)
+                try: os.fsync(dir_fd)
+                finally: os.close(dir_fd)
         finally:
             if tmp.exists():
                 try:tmp.unlink()
