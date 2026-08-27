@@ -72,10 +72,11 @@ class ToolIntentStore:
             raw["claim_expires_at"]=(now+timedelta(seconds=self.claim_ttl_seconds)).isoformat(); self._write(data); return True
     def release_claim(self,key,owner_id,claim_token,state="ambiguous"):
         if state not in AMBIGUOUS_STATES:raise ValueError("release state must be ambiguous")
-        with self.execution_lock():
-            data=self._read(); raw=data.get(key)
-            if raw is None or raw.get("owner_id")!=owner_id or raw.get("claim_token")!=claim_token:return False
-            raw["owner_id"],raw["claim_token"],raw["claim_expires_at"],raw["state"]=None,None,None,state; self._write(data); return True
+        with self.execution_lock(): return self._release_claim_unlocked(key,owner_id,claim_token,state)
+    def _release_claim_unlocked(self,key,owner_id,claim_token,state="ambiguous"):
+        data=self._read(); raw=data.get(key)
+        if raw is None or raw.get("owner_id")!=owner_id or raw.get("claim_token")!=claim_token:return False
+        raw["owner_id"],raw["claim_token"],raw["claim_expires_at"],raw["state"]=None,None,None,state; self._write(data); return True
     def mark_claimed(self,key,owner_id,claim_token,state):
         if state not in TERMINAL_STATES:raise ValueError("mark_claimed requires a terminal state")
         with self.execution_lock():return self._mark_claimed_unlocked(key,owner_id,claim_token,state)
