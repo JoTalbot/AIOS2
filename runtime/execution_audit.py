@@ -10,6 +10,11 @@ from typing import Any, Dict, List, Optional
 from .execution_context import ExecutionContext
 from .execution_events import ExecutionEvent
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
+
 
 @dataclass(frozen=True)
 class ExecutionAuditEvent:
@@ -41,25 +46,48 @@ class AuditEvent:
     correlation_id: Optional[str] = None
 
 
+class _AuditLock:
+    def __init__(self, path: Path):
+        self.path = path
+        self.handle = None
+
+    def __enter__(self):
+        self.path.touch(exist_ok=True)
+        self.handle = self.path.open("r+", encoding="utf-8")
+        if fcntl is not None:
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if fcntl is not None:
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+        self.handle.close()
+
+
 class ExecutionAuditLog:
     def __init__(self, path: str = "data/execution_audit.jsonl"):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
 
-    def append(self, event: ExecutionAuditEvent) -> ExecutionAuditEvent:
+    def append(self, event: ExecutionAuditEvent):
         event = event.with_identity()
-        if self._contains(event.event_id):
-            return event
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(asdict(event), ensure_ascii=False) + "\n")
+        with _AuditLock(self.lock_path):
+            if self._contains(event.event_id):
+                return event
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(asdict(event), ensure_ascii=False) + "\n")
+                handle.flush()
+                import os
+                os.fsync(handle.fileno())
         return event
 
-    def _contains(self, event_id: str) -> bool:
+    def _contains(self, event_id):
         if not self.path.exists():
             return False
         return any(json.loads(line).get("event_id") == event_id for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip())
 
-    def events(self, execution_id: Optional[str] = None):
+    def events(self, execution_id=None):
         if not self.path.exists():
             return []
         result = []
