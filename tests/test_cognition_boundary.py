@@ -51,3 +51,30 @@ async def test_pipeline_can_run_with_only_planner():
     result = await CognitionPipeline(PlannerStub()).run(CognitionRequest(context))
     assert result["plan"].value == [{"tool": "noop"}]
     assert result["evaluation"] is None
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_can_use_cognition_without_replacing_runtime_execution_context():
+    from runtime.vnext_orchestrator import VNextOrchestrator
+
+    class Scheduler:
+        async def submit(self, task): self.task = task
+        async def run_until_idle(self): self.task.state = type("State", (), {"value": "completed"})(); self.task.payload["result"] = {"ok": True}
+
+    class LegacyPlanner:
+        async def create_plan(self, goal): return {"legacy": True}
+
+    class Agent: id = "agent-1"
+    class Cognition:
+        async def plan(self, request):
+            assert request.context.goal == "ship"
+            return CognitionDecision("plan", {"cognitive": True})
+        async def evaluate(self, request): return CognitionDecision("evaluation", request.observation)
+        async def reflect(self, request): return CognitionDecision("reflection", request.observation)
+        async def learn(self, request): return CognitionDecision("learning", request.observation)
+
+    result = await VNextOrchestrator(LegacyPlanner(), Scheduler(), Agent(), cognition=Cognition()).run("ship", "task-1")
+    assert result.status == "completed"
+    assert result.metadata["plan"] == {"cognitive": True}
+    assert result.metadata["cognition_evaluation"].kind == "evaluation"
+    assert result.metadata["cognition_learning"].kind == "learning"
