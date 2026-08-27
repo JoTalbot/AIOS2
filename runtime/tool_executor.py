@@ -1,6 +1,7 @@
 """Timeout/cancellation aware execution of typed tool calls."""
 
 import asyncio
+from typing import Dict
 
 from .event_bus import EventBus
 from .execution_context import ExecutionContext
@@ -14,8 +15,24 @@ class ToolExecutor:
     def __init__(self, sandbox: ToolSandbox, event_bus: EventBus | None = None):
         self.sandbox = sandbox
         self.event_bus = event_bus
+        self._idempotent_results: Dict[str, ToolResult] = {}
+        self._idempotent_locks: Dict[str, asyncio.Lock] = {}
 
     async def execute(self, call: ToolCall, context: ToolExecutionContext, execution_context: ExecutionContext | None = None) -> ToolResult:
+        key = call.idempotency_key
+        if key:
+            lock = self._idempotent_locks.setdefault(key, asyncio.Lock())
+            async with lock:
+                cached = self._idempotent_results.get(key)
+                if cached is not None:
+                    return cached
+                result = await self._execute_once(call, context, execution_context)
+                if result.ok:
+                    self._idempotent_results[key] = result
+                return result
+        return await self._execute_once(call, context, execution_context)
+
+    async def _execute_once(self, call: ToolCall, context: ToolExecutionContext, execution_context: ExecutionContext | None = None) -> ToolResult:
         ctx = execution_context or ExecutionContext(agent_id=context.agent_id)
         await self._publish(TOOL_STARTED, ctx, {"tool": call.tool, "call_id": call.call_id})
         try:

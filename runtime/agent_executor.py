@@ -37,7 +37,7 @@ class AgentExecutor:
                 if not tool:
                     results.append(step)
                     continue
-                call = ToolCall(tool=tool, arguments=dict(step.get("arguments") or step.get("kwargs") or {}), call_id=str(step.get("call_id") or f"{agent_id}:{index}"), timeout=step.get("timeout"))
+                call = ToolCall(tool=tool, arguments=dict(step.get("arguments") or step.get("kwargs") or {}), call_id=str(step.get("call_id") or f"{agent_id}:{index}"), timeout=step.get("timeout"), idempotency_key=step.get("idempotency_key") or f"{ctx.execution_id}:{step.get('call_id') or index}")
                 result = await self._execute_with_retry(call, agent_id, permissions, ctx)
                 results.append(result)
                 if self.memory and hasattr(self.memory, "remember"):
