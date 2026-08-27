@@ -9,7 +9,7 @@ from typing import Optional
 
 try:
     import fcntl
-except ImportError:  # pragma: no cover - Windows fallback keeps API usable.
+except ImportError:  # pragma: no cover
     fcntl = None
 
 
@@ -26,13 +26,14 @@ class ExecutionLeaseStore:
         self.path = Path(path)
         self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.ttl_seconds = max(1, ttl_seconds)
+        # Zero/negative TTL is intentionally allowed for deterministic expiry
+        # tests and takeover simulations.
+        self.ttl_seconds = max(0, ttl_seconds)
         if not self.path.exists():
             self._write({})
 
     @contextmanager
     def _lock(self):
-        """Serialize read-modify-write lease operations across processes."""
         with self.lock_path.open("a+", encoding="utf-8") as handle:
             if fcntl is not None:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
@@ -78,21 +79,14 @@ class ExecutionLeaseStore:
             return bool(current and current["owner_id"] == owner_id and datetime.fromisoformat(current["expires_at"]) > datetime.now(timezone.utc))
 
     def fencing_token(self, execution_id: str) -> Optional[int]:
-        """Return the current fencing token for an execution."""
         with self._lock():
             current = self._read().get(execution_id)
             return int(current["fencing_token"]) if current and "fencing_token" in current else None
 
     def owns_token(self, execution_id: str, owner_id: str, fencing_token: int) -> bool:
-        """Validate both owner and fencing generation before a mutation."""
         with self._lock():
             current = self._read().get(execution_id)
-            return bool(
-                current
-                and current["owner_id"] == owner_id
-                and int(current.get("fencing_token", 0)) == fencing_token
-                and datetime.fromisoformat(current["expires_at"]) > datetime.now(timezone.utc)
-            )
+            return bool(current and current["owner_id"] == owner_id and int(current.get("fencing_token", 0)) == fencing_token and datetime.fromisoformat(current["expires_at"]) > datetime.now(timezone.utc))
 
     def _store(self, execution_id, owner_id, data, now, fencing_token):
         lease = ExecutionLease(execution_id, owner_id, (now + timedelta(seconds=self.ttl_seconds)).isoformat(), fencing_token)
