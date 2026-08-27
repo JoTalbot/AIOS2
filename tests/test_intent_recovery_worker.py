@@ -45,12 +45,14 @@ def test_recovery_fencing_loss_does_not_commit_claim(tmp_path):
     worker = IntentRecoveryWorker(intents, leases, "worker-a")
 
     def resolver(item):
-        # Rotate the lease before the final fenced commit. The worker must not
-        # terminally transition the intent with the stale fencing token.
+        # Simulate lease loss/rotation before the final fenced commit.
+        current = leases.acquire("e1", "worker-a")
+        assert current is not None
+        assert leases.release("e1", "worker-a", current.fencing_token)
         rotated = leases.acquire("e1", "worker-b")
         assert rotated is not None
         return "completed", {"ok": True}
 
     result = worker.recover_one(intent, resolver)
     assert result.status == "skipped_by_lease"
-    assert intents.get("k").state in {"ambiguous", "executing"}
+    assert intents.get("k").state == "executing"
