@@ -7,22 +7,17 @@ from runtime.tool_protocol import ToolResult
 
 
 class Planner:
-    def __init__(self):
-        self.calls = 0
-
+    def __init__(self): self.calls = 0
     async def create_plan(self, goal):
         self.calls += 1
         return [{"tool": "work", "arguments": {"goal": goal}}]
 
 
 class Executor:
-    def __init__(self):
-        self.calls = 0
-
+    def __init__(self): self.calls = 0
     async def execute(self, agent, plan, context, execution):
         self.calls += 1
-        if self.calls == 1:
-            return [ToolResult("c1", "work", False, error="temporary")]
+        if self.calls == 1: return [ToolResult("c1", "work", False, error="temporary")]
         return [ToolResult("c2", "work", True, value="done")]
 
 
@@ -31,12 +26,9 @@ async def test_loop_uses_recovery_checkpoint_for_attempts_and_completion(tmp_pat
     store = ExecutionStore(str(tmp_path / "executions.json"))
     planner = Planner()
     loop = AutonomousExecutionLoop(Executor(), planner, ReplanningPolicy(max_attempts=2), store=store)
-
     result = await loop.run("checkpoint me", "agent-1")
-
     assert result.status == "completed"
-    execution_id = next(iter(store._read()))
-    state = store.get(execution_id)
+    state = store.get(store.execution_ids()[0])
     assert state.status == "completed"
     assert state.attempt == 2
     assert state.result[0].ok is True
