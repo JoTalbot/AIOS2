@@ -6,13 +6,21 @@ from .recovery_checkpoint import RecoveryCheckpoint
 class LeaseAwareCheckpoint:
     def __init__(self, checkpoint: RecoveryCheckpoint, lease_store, owner_id: str):
         self.checkpoint, self.lease_store, self.owner_id = checkpoint, lease_store, owner_id
+        self._fences = {}
 
     def _assert_owner(self, execution_id: str, *, acquire=False):
-        if self.lease_store.is_owner(execution_id, self.owner_id):
-            return
-        if acquire and self.lease_store.acquire(execution_id, self.owner_id) is not None:
-            return
-        raise RuntimeError(f"execution '{execution_id}' lease is not owned by '{self.owner_id}'")
+        token = self._fences.get(execution_id)
+        if token is None and self.lease_store.is_owner(execution_id, self.owner_id):
+            token = self.lease_store.fencing_token(execution_id)
+            self._fences[execution_id] = token
+        if acquire and token is None:
+            lease = self.lease_store.acquire(execution_id, self.owner_id)
+            if lease is not None:
+                token = lease.fencing_token
+                self._fences[execution_id] = token
+        if token is not None and self.lease_store.owns_token(execution_id, self.owner_id, token):
+            return token
+        raise RuntimeError(f"execution '{execution_id}' lease fence is not owned by '{self.owner_id}'")
 
     def mark_running(self, state, attempt, plan=None):
         self._assert_owner(state.execution_id, acquire=state.status == "pending")
