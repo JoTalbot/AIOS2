@@ -30,7 +30,7 @@ class ToolExecutor:
         lock = self._idempotent_locks.setdefault(key, asyncio.Lock())
         async with lock:
             cached = self._idempotent_results.get(key)
-            if cached is not None: return cached
+            if cached is not None and not cached.retryable: return cached
             if self.idempotency_store:
                 stored = self.idempotency_store.get(key)
                 if stored:
@@ -39,14 +39,14 @@ class ToolExecutor:
             claimed_intent = False
             if self.intent_store:
                 intent = self.intent_store.prepare(ToolIntent(key, call.call_id, call.tool, call.arguments, getattr(execution_context, "execution_id", None)))
-                if intent.state == "completed" and self.idempotency_store:
+                if intent.state in {"completed", "failed"} and self.idempotency_store:
                     stored = self.idempotency_store.get(key)
                     if stored:
                         result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key); self._idempotent_results[key] = result; return result
                 claimed = self.intent_store.claim(key, claim_owner, claim_token)
                 if claimed is None:
                     current = self.intent_store.get(key)
-                    if current and current.state == "completed" and self.idempotency_store:
+                    if current and current.state in {"completed", "failed"} and self.idempotency_store:
                         stored = self.idempotency_store.get(key)
                         if stored:
                             result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key); self._idempotent_results[key] = result; return result
@@ -54,42 +54,35 @@ class ToolExecutor:
                 claimed_intent = True
             try:
                 result = await self._execute_once(call, context, execution_context)
-                if result.ok:
-                    if self.idempotency_store:
-                        stored = self.idempotency_store.put_if_absent(StoredToolResult(key, call.call_id, call.tool, True, result.value))
-                        result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
-                    if self.intent_store: self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed")
+                if result.retryable:
+                    if claimed_intent and self.intent_store: self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
                     self._idempotent_results[key] = result
-                elif claimed_intent and self.intent_store:
-                    self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous"); result = ToolResult.failure(call, RuntimeError(result.error or "tool outcome is ambiguous"), retryable=False)
+                    return result
+                if self.idempotency_store:
+                    stored = self.idempotency_store.put_if_absent(StoredToolResult(key, call.call_id, call.tool, result.ok, result.value if result.ok else None, result.error))
+                    result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
+                if claimed_intent and self.intent_store:
+                    self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed" if result.ok else "failed")
+                self._idempotent_results[key] = result
                 return result
             except asyncio.CancelledError:
                 if claimed_intent and self.intent_store: self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
                 raise
 
     async def reconcile_intent(self, intent: ToolIntent, resolver):
-        """Resolve an ambiguous operation and persist its terminal state.
-
-        When invoked by a fencing-aware recovery worker, the worker owns the
-        claim and is responsible for the final CAS. For standalone recovery,
-        there is no claim owner, so this method safely finalizes the intent
-        itself after the durable result is known.
-        """
+        """Resolve an ambiguous operation and persist its terminal state."""
         if self.idempotency_store:
             stored = self.idempotency_store.get(intent.idempotency_key)
             if stored:
-                result = ToolResult(intent.call_id, intent.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
-                if self.intent_store and not (intent.owner_id and intent.claim_token):
-                    self.intent_store.mark(intent.idempotency_key, "completed" if result.ok else "failed")
-                return result
+                if self.intent_store and not (intent.owner_id and intent.claim_token): self.intent_store.mark(intent.idempotency_key, "completed" if stored.ok else "failed")
+                return ToolResult(intent.call_id, intent.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
         result = resolver(intent)
         if hasattr(result, "__await__"): result = await result
         if result is None: return None
         if not isinstance(result, ToolResult): raise TypeError("resolver must return ToolResult or None")
-        if result.ok and self.idempotency_store:
-            self.idempotency_store.put_if_absent(StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, True, result.value))
-        if self.intent_store and not (intent.owner_id and intent.claim_token):
-            self.intent_store.mark(intent.idempotency_key, "completed" if result.ok else "failed")
+        if self.idempotency_store:
+            stored = self.idempotency_store.put_if_absent(StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, result.ok, result.value if result.ok else None, result.error))
+        if self.intent_store and not (intent.owner_id and intent.claim_token): self.intent_store.mark(intent.idempotency_key, "completed" if result.ok else "failed")
         return result
 
     async def _publish(self, event_type: str, context: ExecutionContext, data: dict):
