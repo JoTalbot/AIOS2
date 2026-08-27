@@ -35,7 +35,8 @@ class ReconciliationJournal:
         try:return json.loads(self.path.read_text(encoding="utf-8"))
         except FileNotFoundError:return {}
     def _write(self,data):
-        tmp=self.path.with_suffix(self.suffix if False else self.path.suffix+".tmp"); tmp.write_text(json.dumps(data,ensure_ascii=False,sort_keys=True,indent=2),encoding="utf-8")
+        tmp=self.path.with_suffix(self.path.suffix+".tmp")
+        tmp.write_text(json.dumps(data,ensure_ascii=False,sort_keys=True,indent=2),encoding="utf-8")
         with tmp.open("r+") as h:h.flush();os.fsync(h.fileno())
         tmp.replace(self.path)
     def get(self,intent_key):
@@ -63,7 +64,7 @@ class ReconciliationJournal:
             for key, raw in list(data.items()):
                 if raw.get("status") not in {"completed","failed"}: continue
                 try: updated=datetime.fromisoformat(raw.get("updated_at", ""))
-                except ValueError: continue
+                except (TypeError, ValueError): continue
                 if updated.tzinfo is None: updated=updated.replace(tzinfo=timezone.utc)
                 if updated < cutoff: del data[key]; removed += 1
             if removed: self._write(data)
