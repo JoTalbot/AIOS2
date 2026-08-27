@@ -39,15 +39,15 @@ class ToolIntentRecoveryWorker:
         if claimed is None:
             if lease is not None: self.lease_store.release(intent.idempotency_key, self.owner_id, lease.fencing_token)
             return IntentRecoveryResult(intent.idempotency_key, "skipped_by_claim")
-        renewer = asyncio.create_task(self._renew_loop(intent.idempotency_key, owner, claim_token))
-        attempts = 0
+        renewer = asyncio.create_task(self._renew_loop(intent.idempotency_key, owner, claim_token)); attempts = 0
         try:
             while attempts < self.max_attempts:
                 attempts += 1
                 if lease is not None and not self.lease_store.is_owner(intent.idempotency_key, self.owner_id, lease.fencing_token): return IntentRecoveryResult(intent.idempotency_key, "skipped_by_lease", attempts)
                 try: result = await executor.reconcile_intent(claimed, resolver)
                 except asyncio.CancelledError:
-                    self.store.release_claim(intent.idempotency_key, owner, claim_token, "ambiguous")
+                    # Leave the claim executing so a later recovery pass can
+                    # reconcile an operation that may have crossed its side-effect boundary.
                     raise
                 except Exception: result = None
                 if result is not None:
