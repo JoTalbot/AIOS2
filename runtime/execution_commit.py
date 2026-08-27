@@ -84,6 +84,7 @@ class ExecutionCommitCoordinator:
         for line in self.journal_path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
+            raw = {}
             try:
                 raw = json.loads(line)
                 sequence = int(raw.get("sequence", expected))
@@ -96,7 +97,7 @@ class ExecutionCommitCoordinator:
                 self._quarantine(line, str(exc))
                 try:
                     expected = max(expected + 1, int(raw.get("sequence", 0)) + 1)
-                except (UnboundLocalError, AttributeError, TypeError, ValueError):
+                except (AttributeError, TypeError, ValueError):
                     expected += 1
                 continue
             result.append(commit)
