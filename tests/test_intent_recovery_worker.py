@@ -55,4 +55,7 @@ def test_recovery_fencing_loss_does_not_commit_claim(tmp_path):
 
     result = worker.recover_one(intent, resolver)
     assert result.status == "skipped_by_lease"
+    # The recovery worker has already claimed the intent before discovering
+    # lease loss. The claim remains fenced/executing until a valid owner can
+    # reconcile it; it must never be promoted to a terminal state by the stale worker.
     assert intents.get("k").state == "executing"
