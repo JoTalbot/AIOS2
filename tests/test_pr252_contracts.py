@@ -15,6 +15,6 @@ def test_operator_auth_ci_token_meets_config_contract(monkeypatch):
     assert config.role == "operator"
 
 
-def test_scheduler_executor_contract_accepts_execution_context():
-    from kernel.scheduler import Scheduler
-    assert hasattr(Scheduler, "execute")
+def test_runtime_uses_canonical_execution_boundary():
+    from runtime.runtime_orchestrator import RuntimeOrchestrator
+    assert hasattr(RuntimeOrchestrator, "execute")
