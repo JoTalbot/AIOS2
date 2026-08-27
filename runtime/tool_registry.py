@@ -1,6 +1,6 @@
 """Policy-aware tool registry for AIOS vNext."""
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, FrozenSet, Iterable, Optional
+from typing import Any, Callable, Dict, FrozenSet
 
 @dataclass(frozen=True)
 class ToolSpec:
@@ -24,9 +24,12 @@ class ToolRegistry:
         try: return self._tools[name]
         except KeyError as exc: raise KeyError(f"unknown tool: {name}") from exc
     async def execute(self, name, *, granted_permissions=None, **kwargs):
+        call = name if hasattr(name, "tool") else None
         spec=self.get(name); granted=frozenset(str(p).strip() for p in (granted_permissions or ()) if str(p).strip())
         missing=spec.permissions-granted
         if missing: raise ToolPermissionError(f"tool '{spec.name}' requires permissions: {sorted(missing)}")
+        if call is not None:
+            kwargs = dict(call.arguments or {})
         result=spec.handler(**kwargs)
         return await result if hasattr(result, "__await__") else result
     def names(self): return tuple(sorted(self._tools))
