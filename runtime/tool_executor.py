@@ -13,7 +13,7 @@ from .event_types import TOOL_COMPLETED, TOOL_FAILED, TOOL_STARTED
 from .tool_idempotency_store import StoredToolResult, ToolIdempotencyStore
 from .tool_intent_store import ToolIntent, ToolIntentStore
 from .tool_protocol import ToolCall, ToolResult
-from .tool_sandbox import ToolBoundaryError, ToolExecutionContext
+from .tool_sandbox import ToolBoundaryError, ToolExecutionContext, ToolSandbox
 from .tool_registry import ToolPermissionError
 
 
