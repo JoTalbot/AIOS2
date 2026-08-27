@@ -1,5 +1,9 @@
-"""Persistent execution state backed by a domain state machine and audit log."""
+"""Persistent execution state with process-safe optimistic CAS.
 
+The JSON file remains the durable representation, while an adjacent lock file
+serializes read/validate/write critical sections.  This prevents two workers
+from both validating the same version and then overwriting each other.
+"""
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
@@ -9,13 +13,18 @@ from typing import Any, Dict, Optional
 from .execution_audit import ExecutionAuditEvent, ExecutionAuditLog
 from .execution_state_machine import ExecutionStateMachine
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
+
 
 class ExecutionStoreCorruptionError(RuntimeError):
-    """Raised when the execution store cannot be safely decoded."""
+    pass
 
 
 class ExecutionVersionConflictError(RuntimeError):
-    """Raised when a compare-and-set write observes a newer execution version."""
+    pass
 
 
 @dataclass
@@ -32,18 +41,37 @@ class ExecutionState:
     version: int = 0
 
 
-class ExecutionStore:
-    """Small atomic JSON store with optimistic versioning and CAS updates."""
+class _FileLock:
+    def __init__(self, path: Path):
+        self.path = path
+        self.handle = None
 
+    def __enter__(self):
+        self.path.touch(exist_ok=True)
+        self.handle = self.path.open("r+", encoding="utf-8")
+        if fcntl is not None:
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if fcntl is not None:
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+        self.handle.close()
+
+
+class ExecutionStore:
     def __init__(self, path: str = "data/executions.json", state_machine: Optional[ExecutionStateMachine] = None, audit_log: Optional[ExecutionAuditLog] = None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         self.state_machine = state_machine or ExecutionStateMachine()
         self.audit_log = audit_log
         if not self.path.exists():
-            self._write({})
+            with _FileLock(self.lock_path):
+                if not self.path.exists():
+                    self._write({})
 
-    def _read(self) -> Dict[str, Any]:
+    def _read_unlocked(self) -> Dict[str, Any]:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -56,7 +84,11 @@ class ExecutionStore:
 
     def _write(self, data: Dict[str, Any]) -> None:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
+        with tmp.open("w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, default=str, indent=2)
+            handle.flush()
+            import os
+            os.fsync(handle.fileno())
         tmp.replace(self.path)
 
     @staticmethod
@@ -69,31 +101,31 @@ class ExecutionStore:
         return value
 
     def save(self, state: ExecutionState) -> ExecutionState:
-        return self._save(state, expected_version=None)
+        return self._save(state, None)
 
     def compare_and_set(self, state: ExecutionState, expected_version: int) -> ExecutionState:
-        """Persist only if the stored version still equals expected_version."""
         if not isinstance(expected_version, int) or expected_version < 0:
             raise ValueError("expected_version must be a non-negative integer")
-        return self._save(state, expected_version=expected_version)
+        return self._save(state, expected_version)
 
     def _save(self, state: ExecutionState, expected_version: Optional[int]) -> ExecutionState:
-        if not isinstance(state.execution_id, str) or not state.execution_id:
+        if not state.execution_id:
             raise ValueError("execution_id must be a non-empty string")
-        data = self._read()
-        previous = data.get(state.execution_id)
-        current_version = self._version(previous)
-        if expected_version is not None and current_version != expected_version:
-            raise ExecutionVersionConflictError(
-                f"execution '{state.execution_id}' version changed: expected {expected_version}, found {current_version}"
-            )
-        if previous:
-            self.state_machine.validate(previous.get("status", "pending"), state.status)
-        old_status = previous.get("status", "pending") if previous else None
-        state.version = current_version + 1
-        state.updated_at = datetime.now(timezone.utc).isoformat()
-        data[state.execution_id] = asdict(state)
-        self._write(data)
+        with _FileLock(self.lock_path):
+            data = self._read_unlocked()
+            previous = data.get(state.execution_id)
+            current_version = self._version(previous)
+            if expected_version is not None and current_version != expected_version:
+                raise ExecutionVersionConflictError(
+                    f"execution '{state.execution_id}' version changed: expected {expected_version}, found {current_version}"
+                )
+            if previous:
+                self.state_machine.validate(previous.get("status", "pending"), state.status)
+            old_status = previous.get("status", "pending") if previous else None
+            state.version = current_version + 1
+            state.updated_at = datetime.now(timezone.utc).isoformat()
+            data[state.execution_id] = asdict(state)
+            self._write(data)
         if self.audit_log and old_status != state.status:
             self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", state.status, state.attempt, state.error, correlation_id=state.correlation_id))
         return state
@@ -104,15 +136,17 @@ class ExecutionStore:
             if status != "pending":
                 raise KeyError(execution_id)
             state = ExecutionState(execution_id=execution_id)
-        self.state_machine.validate(state.status, status)
         state.status = status
         for key, value in updates.items():
             setattr(state, key, value)
         return self.save(state)
 
     def get(self, execution_id: str) -> Optional[ExecutionState]:
-        raw = self._read().get(execution_id)
+        with _FileLock(self.lock_path):
+            raw = self._read_unlocked().get(execution_id)
         return ExecutionState(**raw) if raw else None
 
     def resumable(self):
-        return [ExecutionState(**raw) for raw in self._read().values() if raw.get("status") in {"running", "retrying"}]
+        with _FileLock(self.lock_path):
+            values = self._read_unlocked().values()
+            return [ExecutionState(**raw) for raw in values if raw.get("status") in {"running", "retrying"}]
