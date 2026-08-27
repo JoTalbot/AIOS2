@@ -2,31 +2,33 @@
 
 ## Current phase
 - Phase: production hardening of the vNext execution/recovery path
-- Branch: `batch/24-coordination-lock-unification`
-- Latest integrated commit on `main`: `8c9dc3b87dfaa075317959c0893acb9c4e7b40c1`
-- Active work commits: `058adaff1c67f5b50071502e69bd126f29781249`, `1ca1dcc64995ab3e8163c0cf7085fb95e4b2200d`
-- Active PR: pending creation
+- Branch: `main`
+- Latest integrated commit on `main`: `6647febf1adc5dee50b6d0d61ed5b4799c162b29`
+- Batch 24 PR: #84 merged successfully after CI green
 
 ## Current architecture
 - Runtime owns execution identity, persistence, checkpoints, recovery, leases, fencing and audit.
 - Cognition is an ephemeral decision boundary over the canonical `ExecutionContext`.
-- Execution persistence and lease coordination must use one execution-scoped coordination lock when configured.
+- Execution persistence and lease coordination use one execution-scoped coordination lock when configured.
 
-## Batch 24 — Coordination lock unification
-- Fixed `ExecutionStore._save()` and therefore normal `save()`/CAS writes to acquire `execution_lock()` instead of bypassing the configured coordination lock.
-- This closes a split-lock race where lease operations and state CAS could coordinate on different lock files.
-- Added regression coverage proving CAS uses the configured coordination lock.
+## Batch 24 — Completed
+- Fixed `ExecutionStore._save()` so normal `save()`/CAS writes acquire `execution_lock()` and cannot bypass a configured coordination lock.
+- Closed a split-lock race between lease coordination and execution state CAS.
+- Added regression coverage proving configured coordination locking is used by store writes.
+- CI run 221 completed successfully: full test suite and recovery RBAC security tests passed.
 
-## Validation
-- Focused regression tests added in `tests/test_execution_lock_protocol.py`.
-- Local execution is not available through the GitHub connector; GitHub Actions is authoritative.
-- Branch is based directly on current `main` and is 2 commits ahead, 0 behind.
+## Rescan findings — Batch 25 candidates
+1. Journal readers are not synchronized with journal writers; `_read_journal()` reads without `_JournalLock`, while append/mark use the lock.
+2. `_quarantine()` writes without the journal lock, so concurrent corruption handling can race or interleave.
+3. Journal read/repair locking needs an explicit internal unlocked reader to avoid relying on nested file-lock behavior in `_mark()`.
+4. Repository lacks the requested top-level operational docs (`README.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `TASKS.md`, `CHANGELOG.md`, `TESTING.md`); documentation debt should be addressed after correctness blockers.
 
 ## Next actions
-1. Open PR for Batch 24 and wait for GitHub Actions.
-2. Fix CI failures on this owning branch only.
-3. Merge only after CI is green.
-4. Rescan execution/recovery boundaries for the next concurrency, durability or security issue.
+1. Harden journal read/quarantine synchronization without changing the public commit protocol.
+2. Add concurrency/crash regression tests for journal readers and corruption quarantine.
+3. Run full CI and security checks.
+4. Update operational documentation to reflect the real architecture and recovery invariants.
+5. Rescan for the next durability, concurrency or security blocker.
 
 ## Rules
 GitHub is the source of truth. Every significant step updates this file. Do not force-push shared branches.
