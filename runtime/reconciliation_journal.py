@@ -39,23 +39,30 @@ class ReconciliationJournal:
         tmp.write_text(json.dumps(data,ensure_ascii=False,sort_keys=True,indent=2),encoding="utf-8")
         with tmp.open("r+") as h:h.flush();os.fsync(h.fileno())
         tmp.replace(self.path)
+    @staticmethod
+    def _record(intent_key, raw):
+        if not isinstance(raw, dict): raise ValueError("invalid journal record")
+        if raw.get("intent_key") != intent_key or "execution_id" not in raw or "status" not in raw:
+            raise ValueError("invalid journal record")
+        return ReconciliationRecord(**raw)
     def get(self,intent_key):
         with self._lock():
-            raw=self._read().get(intent_key); return ReconciliationRecord(**raw) if raw else None
+            raw=self._read().get(intent_key); return self._record(intent_key, raw) if raw else None
     def begin(self,intent_key,execution_id=None):
         with self._lock():
             data=self._read(); raw=data.get(intent_key)
-            if raw:return ReconciliationRecord(**raw)
+            if raw:return self._record(intent_key, raw)
             record=ReconciliationRecord(intent_key,execution_id,"pending",None,datetime.now(timezone.utc).isoformat()); data[intent_key]=asdict(record); self._write(data); return record
     def complete(self,intent_key,result): return self._set(intent_key,"completed",result)
     def fail(self,intent_key,result=None): return self._set(intent_key,"failed",result)
     def _set(self,intent_key,status,result):
         with self._lock():
             data=self._read(); raw=data.get(intent_key)
-            if raw and raw.get("status") in {"completed","failed"}:return ReconciliationRecord(**raw)
+            if raw and raw.get("status") in {"completed","failed"}:return self._record(intent_key, raw)
             record=ReconciliationRecord(intent_key,raw.get("execution_id") if raw else None,status,result,datetime.now(timezone.utc).isoformat()); data[intent_key]=asdict(record); self._write(data); return record
     def pending(self):
-        with self._lock():return [ReconciliationRecord(**r) for r in self._read().values() if r.get("status")=="pending"]
+        with self._lock():
+            return [self._record(k,r) for k,r in self._read().items() if r.get("status")=="pending"]
     def compact(self, retention=timedelta(days=30), now=None):
         """Remove only terminal records older than retention; pending records are never removed."""
         cutoff=(now or datetime.now(timezone.utc))-retention
