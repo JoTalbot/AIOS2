@@ -1,0 +1,62 @@
+name: AIOS2 CI
+
+on:
+  push:
+    branches: [main, 'feat/**', 'batch/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: aios2-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNNER_LABEL: runnerhut-linux-2vcpu-d03d2827
+
+jobs:
+  runner-check:
+    name: Runner connectivity
+    runs-on: runnerhut-linux-2vcpu-d03d2827
+    timeout-minutes: 10
+    steps:
+      - name: Runner diagnostics
+        run: |
+          echo "RUNNER_NAME=$RUNNER_NAME"
+          echo "RUNNER_OS=$RUNNER_OS"
+          echo "RUNNER_ARCH=$RUNNER_ARCH"
+          uname -a
+          python --version || true
+
+  tests:
+    name: Pytest
+    needs: runner-check
+    runs-on: runnerhut-linux-2vcpu-d03d2827
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install -U pip pytest pytest-asyncio fastapi pydantic httpx
+      - name: Run test suite
+        run: python -m pytest tests -q
+
+  security:
+    name: Security regression
+    needs: runner-check
+    runs-on: runnerhut-linux-2vcpu-d03d2827
+    timeout-minutes: 15
+    env:
+      AIOS_OPERATOR_TOKEN: ci-test-token-16
+      AIOS_OPERATOR_ROLE: operator
+      AIOS_OPERATOR_ACTOR: ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install security dependencies
+        run: python -m pip install -U pip pytest fastapi pydantic httpx
+      - name: Run security regression suite
+        run: python -m pytest tests/test_recovery_rbac_matrix.py -q
