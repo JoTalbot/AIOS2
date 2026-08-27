@@ -1,5 +1,6 @@
-"""Real subprocess SIGKILL tests for lock/validation/rename boundaries."""
+"""Real subprocess SIGKILL and contention tests for fencing boundaries."""
 import json
+import multiprocessing as mp
 import os
 import signal
 import subprocess
@@ -72,8 +73,7 @@ def test_sigkill_after_lease_validation_before_write_is_safe(tmp_path):
         s.acquire('e1','dead-worker')
     """, env, "validated")
     restarted = ExecutionLeaseStore(env["LEASES"])
-    lease = restarted.acquire("e1", "live-worker")
-    assert lease is not None and lease.fencing_token == 1
+    assert restarted.acquire("e1", "live-worker").fencing_token == 1
 
 
 def test_sigkill_after_lease_fsync_before_rename_preserves_old_target(tmp_path):
@@ -168,3 +168,54 @@ def test_sigkill_after_claim_fsync_before_rename_preserves_old_target(tmp_path):
     restarted = ToolIntentStore(env["INTENTS"])
     assert restarted.get("k").owner_id is None
     assert restarted.claim("k", "live-worker", "claim-2") is not None
+
+
+def _lease_contender(path, owner, queue):
+    store = ExecutionLeaseStore(path, ttl_seconds=5)
+    lease = store.acquire("stress", owner)
+    queue.put((owner, lease.fencing_token if lease else None))
+
+
+def test_concurrent_takeover_assigns_unique_monotonic_fencing_tokens(tmp_path):
+    path = str(tmp_path / "leases.json")
+    store = ExecutionLeaseStore(path, ttl_seconds=1)
+    first = store.acquire("stress", "seed")
+    assert first.fencing_token == 1
+    store.release("stress", "seed", first.fencing_token)
+    ctx = mp.get_context("spawn")
+    queue = ctx.Queue()
+    workers = [ctx.Process(target=_lease_contender, args=(path, f"w{i}", queue)) for i in range(8)]
+    for p in workers: p.start()
+    results = [queue.get(timeout=10) for _ in workers]
+    for p in workers: p.join(timeout=10)
+    tokens = [token for _, token in results if token is not None]
+    assert len(tokens) == 1
+    assert tokens[0] == 2
+
+
+def _takeover_loop(path, owner, queue, rounds):
+    store = ExecutionLeaseStore(path, ttl_seconds=0.15)
+    seen = []
+    for _ in range(rounds):
+        lease = None
+        while lease is None:
+            lease = store.acquire("loop", owner)
+            if lease is None:
+                time.sleep(0.01)
+        seen.append(lease.fencing_token)
+        time.sleep(0.03)
+        store.release("loop", owner, lease.fencing_token)
+    queue.put(seen)
+
+
+def test_concurrent_takeover_rounds_never_reuse_fencing_token(tmp_path):
+    path = str(tmp_path / "leases.json")
+    ctx = mp.get_context("spawn")
+    queue = ctx.Queue()
+    workers = [ctx.Process(target=_takeover_loop, args=(path, f"w{i}", queue, 6)) for i in range(4)]
+    for p in workers: p.start()
+    sequences = [queue.get(timeout=20) for _ in workers]
+    for p in workers: p.join(timeout=20)
+    tokens = [token for seq in sequences for token in seq]
+    assert len(tokens) == len(set(tokens))
+    assert sorted(tokens) == list(range(1, len(tokens) + 1))
