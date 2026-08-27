@@ -1,3 +1,5 @@
+import pytest
+
 from runtime.execution_context import ExecutionContext
 from runtime.tool_executor import ToolExecutor
 from runtime.tool_idempotency_store import ToolIdempotencyStore
@@ -7,6 +9,7 @@ from runtime.tool_registry import ToolRegistry
 from runtime.tool_sandbox import ToolSandbox, ToolExecutionContext
 
 
+@pytest.mark.asyncio
 async def test_second_worker_reuses_durable_result_after_first_worker_loses_claim(tmp_path):
     calls = []
     registry = ToolRegistry()
