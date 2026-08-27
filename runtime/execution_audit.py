@@ -70,6 +70,10 @@ class ExecutionAuditLog:
                     result.append(event)
         return result
 
+    def read_all(self):
+        """Compatibility/read-model alias used by recovery and regression tests."""
+        return [asdict(event) for event in self.events()]
+
 
 class ExecutionAudit:
     def __init__(self):
