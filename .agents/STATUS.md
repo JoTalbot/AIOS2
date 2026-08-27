@@ -2,36 +2,31 @@
 
 ## Current phase
 - Phase: isolated new architecture hardening and integration
-- Branch: `batch/recovery-fencing-cas`
-- Latest integrated commit on `main`: `47103e6e5f972b7b578d6dca7c0b94c957d97fb2`
-- Active work commit: `b07410551e53d3700e291c2a2a5c0d30b3ce4cb3`
-
-## Active agents
-| Agent | Task | Branch | Status |
-|---|---|---|---|
-| batch/recovery-http-hardening | Recovery HTTP contract validation, centralized mutation RBAC, and crash-consistency fault injection | merged via PR #40 | completed |
-| batch/recovery-fencing-cas | Close lease-to-state TOCTOU with shared execution-scoped lock, fencing-aware CAS, post-CAS recovery, and audit idempotency | current branch | awaiting CI |
+- Branch: `batch/bootstrap-recovery-fail-closed`
+- Latest integrated commit on `main`: `ae1838a2c4994f1cd7d6e110532e0fe341bcf021`
+- Active work commit: `499f21d23811043a2c4c6a0cf6111240fbcc1c18`
 
 ## Current architecture work
 - vNext orchestration/execution path.
 - Persistence, checkpoint, recovery, leases and audit contracts.
 - ExecutionStore and ExecutionLeaseStore share one execution-scoped coordination lock domain.
 - Commit/reconcile holds the shared lock across lease validation and version/status/fencing-aware CAS, preventing lease rotation between validation and state mutation.
-- Post-CAS crash leaves a durable pending intent; recovery appends the audit event by stable event identity and marks the journal intent reconciled/applied.
-- Audit append is idempotent by event identity, so a crash after audit append and before journal marking cannot create duplicates on repeated recovery.
+- Post-CAS crash is recoverable from the durable pending journal intent; reconciliation records audit exactly once and marks the intent applied.
 - Lease rotation after a post-CAS crash fences the stale worker and prevents stale reconciliation from reapplying the intent.
 
+## New hardening
+- Runtime bootstrap recovery now observes heartbeat failures instead of silently cancelling a failed heartbeat task.
+- A lost/fenced lease during an asynchronous resume fails the recovery operation closed and cancels the stale resume task.
+- Synchronous resume paths perform a final fencing ownership check before reporting success.
+
 ## Validation
-- Added regression coverage proving stale fencing cannot reconcile pending intent.
-- Added regression coverage for fencing loss after journal append.
-- Added concurrency coverage proving lease rotation waits for the coordinated state transition.
-- Added fault-injection coverage for crashes before audit/journal-applied marking and post-CAS recovery.
-- Added fault-injection coverage for crash after audit append before journal-applied marking, including repeated recovery and stable audit identity deduplication.
-- GitHub Actions is the authoritative full-suite validation path.
+- Existing bootstrap lease tests remain covered.
+- Added regression coverage proving heartbeat lease loss cannot be reported as successful recovery.
+- Required targeted and full GitHub Actions validation is pending for this branch.
 
 ## Next actions
-1. Validate `batch/recovery-fencing-cas` through GitHub Actions.
-2. Audit runtime bootstrap/recovery exception mapping for remaining fail-closed gaps.
+1. Run targeted bootstrap lease/recovery tests through GitHub Actions.
+2. Run full tests and security regression checks.
 3. Merge only after required CI is green, then update this status on `main`.
 
 ## Rules
