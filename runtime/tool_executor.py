@@ -123,10 +123,12 @@ class ToolExecutor:
         except ToolBoundaryError:
             raise
         except Exception as exc:
-            # Never label an unknown/timeout failure retryable: the external
-            # operation may have committed before the exception was observed.
-            result = ToolResult.failure(call, exc, retryable=False)
-            await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": False, "idempotency_key": call.idempotency_key})
+            # A plain executor call is retryable because no durable intent claim
+            # exists to prove whether an external side effect committed. When a
+            # durable intent is active, execute() converts this to an explicit
+            # ambiguous outcome instead of replaying the side effect.
+            result = ToolResult.failure(call, exc, retryable=True)
+            await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": True, "idempotency_key": call.idempotency_key})
             return result
 
     async def _publish(self, event_type: str, context: ExecutionContext, data: dict):
