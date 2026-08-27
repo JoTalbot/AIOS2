@@ -2,9 +2,9 @@
 
 ## Current phase
 - Phase: isolated new architecture hardening and integration
-- Branch: `batch/recovery-http-hardening`
-- Latest integrated commit on `main`: `ec5ac30764bfa54ef66ac639f0c26ce369ce3f22`
-- Active work commit: `29e514536aa6d89e4f532042282a8ef3c4e4b8e5`
+- Branch: `batch/recovery-fencing-races`
+- Latest integrated commit on `main`: `47103e6e5f972b7b578d6dca7c0b94c957d97fb2`
+- Active work commit: `526c52b3c66e9041c62b452670eab0af206e72c2`
 
 ## Active agents
 
@@ -22,7 +22,8 @@
 | batch7/observability | Structured recovery outcome | merged via PR #24 | completed |
 | batch/lease-renewal-fencing | Stale-owner lease renewal and bootstrap failure fencing | merged via PR #38 | completed |
 | batch/atomic-cas-crash-hardening | Atomic execution CAS durability and recovery isolation | merged via PR #39 | completed |
-| batch/recovery-http-hardening | Recovery HTTP contract validation, centralized mutation RBAC, and crash-consistency fault injection | current branch | active |
+| batch/recovery-http-hardening | Recovery HTTP contract validation, centralized mutation RBAC, and crash-consistency fault injection | merged via PR #40 | completed |
+| batch/recovery-fencing-races | Fence stale commit/reconcile workers with execution lease tokens | current branch | active |
 
 ## Completed
 - Hardened execution state-machine validation and unknown-state handling.
@@ -41,8 +42,9 @@
 - Updated bootstrap recovery failure persistence to pass the active lease to `RecoveryManager.mark_failed`, preventing stale workers from committing terminal failure state.
 - Added regression coverage for stale renewal using a re-acquired lease with the same owner ID.
 - Restored `ExecutionContext` compatibility export through `runtime.execution_store`.
-- Added optimistic execution-state CAS and atomic persistence hardening in the latest integrated batch.
-- Added fault-injection coverage for stale CAS writers, atomic replace failure, and recovery of a pending commit after a store failure.
+- Added optimistic execution-state CAS and atomic persistence hardening.
+- Added crash/CAS coverage for pending commits and stale concurrent transitions.
+- Added lease fencing to execution commit/reconcile paths so a stale owner cannot apply a pending journal intent after losing its fencing token.
 
 ## Current architecture work
 - vNext orchestration/execution path.
@@ -50,17 +52,17 @@
 - Persistence, checkpoint, recovery, leases and audit contracts.
 - CI has a full pytest workflow in addition to the security regression workflow.
 - Recovery HTTP transport validates supported actions at the request boundary and uses one centralized operator-role guard for mutations.
-- Execution-store and commit-coordinator fault tests now cover crash windows on both sides of the journal/store boundary.
+- Execution-store and commit-coordinator fault tests cover crash windows on both sides of the journal/store boundary.
+- Execution commit coordination can now optionally enforce an `ExecutionLeaseStore` owner/fencing token during commit and reconciliation.
 
 ## Validation
-- Recovery HTTP hardening implementation and focused regression tests are committed on `batch/recovery-http-hardening`.
-- Additional execution-store and execution-commit crash/CAS regression tests are committed on the same branch.
+- Recovery fencing race implementation and regression tests are committed on `batch/recovery-fencing-races`.
 - GitHub Actions is the authoritative full-suite validation path; local execution is not available through the GitHub connector.
 
 ## Next actions
-1. Validate the expanded branch through GitHub Actions.
+1. Validate `batch/recovery-fencing-races` through GitHub Actions.
 2. Audit runtime bootstrap/recovery exception mapping for remaining fail-closed gaps.
-3. Add coverage for stale pending commits after a competing state transition.
+3. Add CAS/fencing integration coverage at the store boundary if CI exposes another race window.
 4. Merge only after required CI is green, then update this status on `main`.
 
 ## Rules
