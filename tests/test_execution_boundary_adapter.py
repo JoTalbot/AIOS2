@@ -35,5 +35,5 @@ def test_adapter_does_not_terminally_commit_ambiguous_result(tmp_path):
     )
 
     assert returned.ambiguous
-    assert intents.get("k").state == "claimed"
+    assert intents.get("k").state == "executing"
     assert results.get("k") is None
