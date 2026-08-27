@@ -4,6 +4,7 @@ from typing import Callable, Optional
 from uuid import uuid4
 
 from .execution_lease import ExecutionLeaseStore
+from .reconciliation_journal import ReconciliationJournal
 from .tool_intent_store import ToolIntentStore
 
 
@@ -16,10 +17,11 @@ class IntentRecoveryResult:
 
 class IntentRecoveryWorker:
     def __init__(self, store: ToolIntentStore, lease_store: ExecutionLeaseStore,
-                 owner_id: str = "tool-intent-recovery"):
+                 owner_id: str = "tool-intent-recovery", journal: ReconciliationJournal | None = None):
         self.store = store
         self.lease_store = lease_store
         self.owner_id = owner_id
+        self.journal = journal
 
     def recover_one(self, intent, resolver: Callable):
         lease_key = intent.execution_id or intent.idempotency_key
@@ -31,27 +33,33 @@ class IntentRecoveryWorker:
         if claimed is None:
             self.lease_store.release(lease_key, self.owner_id, lease.fencing_token)
             return IntentRecoveryResult(intent.idempotency_key, "skipped_by_claim")
+        if self.journal:
+            record = self.journal.begin(intent.idempotency_key, intent.execution_id)
+            if record.status in {"completed", "failed"}:
+                with self.lease_store.execution_lock():
+                    if self.lease_store.is_owner_unlocked(lease_key, self.owner_id, lease.fencing_token):
+                        self.store.mark_claimed(intent.idempotency_key, self.owner_id, claim_token, record.status)
+                return IntentRecoveryResult(intent.idempotency_key, record.status)
         try:
-            status, _ = resolver(claimed)
+            status, value = resolver(claimed)
             if status not in {"completed", "failed"}:
+                if self.journal:
+                    self.journal.begin(intent.idempotency_key, intent.execution_id)
                 self.store.release_claim(intent.idempotency_key, self.owner_id, claim_token)
                 return IntentRecoveryResult(intent.idempotency_key, "ambiguous", "resolver returned unknown state")
 
-            # Keep the lease coordination lock across the final fencing check and
-            # terminal intent CAS. This closes the check-then-act window in which
-            # another recovery worker could rotate the lease between validation
-            # and the fenced state transition.
             with self.lease_store.execution_lock():
-                if not self.lease_store.is_owner_unlocked(
-                    lease_key, self.owner_id, lease.fencing_token
-                ):
+                if not self.lease_store.is_owner_unlocked(lease_key, self.owner_id, lease.fencing_token):
                     self.store.release_claim(intent.idempotency_key, self.owner_id, claim_token)
                     return IntentRecoveryResult(intent.idempotency_key, "skipped_by_lease")
                 committed = self.store.mark_claimed(
                     intent.idempotency_key, self.owner_id, claim_token, status
                 )
-            if committed is None:
-                return IntentRecoveryResult(intent.idempotency_key, "skipped_by_claim")
+                if committed is None:
+                    return IntentRecoveryResult(intent.idempotency_key, "skipped_by_claim")
+                if self.journal:
+                    if status == "completed": self.journal.complete(intent.idempotency_key, value)
+                    else: self.journal.fail(intent.idempotency_key, value)
             return IntentRecoveryResult(intent.idempotency_key, status)
         finally:
             self.lease_store.release(lease_key, self.owner_id, lease.fencing_token)
