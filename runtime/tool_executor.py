@@ -1,6 +1,7 @@
 """Timeout/cancellation aware execution of typed tool calls."""
 
 import asyncio
+import uuid
 from typing import Dict
 
 from .event_bus import EventBus
@@ -40,6 +41,8 @@ class ToolExecutor:
                                             stored.error, False, stored.idempotency_key)
                         self._idempotent_results[key] = result
                         return result
+                claim_owner = f"executor:{uuid.uuid4().hex}"
+                claim_token = uuid.uuid4().hex
                 if self.intent_store:
                     intent = self.intent_store.prepare(ToolIntent(
                         key, call.call_id, call.tool, call.arguments,
@@ -51,20 +54,35 @@ class ToolExecutor:
                                                 stored.error, False, stored.idempotency_key)
                             self._idempotent_results[key] = result
                             return result
-                    self.intent_store.mark(key, "executing")
-                result = await self._execute_once(call, context, execution_context)
-                if result.ok:
-                    if self.idempotency_store:
-                        stored = self.idempotency_store.put_if_absent(
-                            StoredToolResult(key, call.call_id, call.tool, True, result.value))
-                        result = ToolResult(call.call_id, call.tool, stored.ok, stored.value,
-                                            stored.error, False, stored.idempotency_key)
+                    claimed = self.intent_store.claim(key, claim_owner, claim_token)
+                    if claimed is None:
+                        current = self.intent_store.get(key)
+                        if current and current.state == "completed" and self.idempotency_store:
+                            stored = self.idempotency_store.get(key)
+                            if stored:
+                                result = ToolResult(call.call_id, call.tool, stored.ok, stored.value,
+                                                    stored.error, False, stored.idempotency_key)
+                                self._idempotent_results[key] = result
+                                return result
+                        return ToolResult.failure(call, RuntimeError("intent is already claimed"))
+                try:
+                    result = await self._execute_once(call, context, execution_context)
+                    if result.ok:
+                        if self.idempotency_store:
+                            stored = self.idempotency_store.put_if_absent(
+                                StoredToolResult(key, call.call_id, call.tool, True, result.value))
+                            result = ToolResult(call.call_id, call.tool, stored.ok, stored.value,
+                                                stored.error, False, stored.idempotency_key)
+                        if self.intent_store:
+                            self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed")
+                        self._idempotent_results[key] = result
+                    elif self.intent_store:
+                        self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
+                    return result
+                except asyncio.CancelledError:
                     if self.intent_store:
-                        self.intent_store.mark(key, "completed")
-                    self._idempotent_results[key] = result
-                elif self.intent_store:
-                    self.intent_store.mark(key, "ambiguous")
-                return result
+                        self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
+                    raise
         return await self._execute_once(call, context, execution_context)
 
     async def reconcile_intent(self, intent: ToolIntent, resolver):
