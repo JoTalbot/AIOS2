@@ -53,6 +53,10 @@ class ExecutionStore:
         except json.JSONDecodeError as exc: raise ExecutionStoreCorruptionError(f"execution store contains invalid JSON: {self.path}") from exc
         if not isinstance(data,dict): raise ExecutionStoreCorruptionError(f"execution store root must be an object: {self.path}")
         return data
+    def _read(self)->Dict[str,Any]:
+        """Compatibility read API; callers receive a coherent locked snapshot."""
+        with _FileLock(self.lock_path):
+            return self._read_unlocked()
     def _write(self,data):
         tmp=self.path.with_suffix(self.path.suffix+".tmp")
         with tmp.open("w",encoding="utf-8") as h:
