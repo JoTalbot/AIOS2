@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .execution_audit import ExecutionAuditEvent, ExecutionAuditLog
-from .execution_store import ExecutionState, ExecutionStore
+from .execution_store import ExecutionFencingConflictError, ExecutionState, ExecutionStore
 
 try:
     import fcntl
@@ -133,6 +133,9 @@ class ExecutionCommitCoordinator:
             return False
         return self.lease_store.is_owner(execution_id, self.lease_owner_id, self.fencing_token)
 
+    def _fencing_validator(self, execution_id, token):
+        return self._lease_valid(execution_id) and token == self.fencing_token
+
     def commit(self, state, to_status, *, checkpoint=None, reason=None):
         current = self.store.get(state.execution_id) or state
         if not self._lease_valid(current.execution_id):
@@ -142,9 +145,18 @@ class ExecutionCommitCoordinator:
         if existing:
             return existing
         commit = self._append_journal(ExecutionCommit(commit_id, current.execution_id, current.status, to_status, current.attempt, checkpoint, reason, correlation_id=current.correlation_id))
-        if not self._lease_valid(current.execution_id):
+        try:
+            self.store.compare_and_set(
+                ExecutionState(**{**asdict(current), "status": to_status, "result": checkpoint if to_status == "completed" else current.result, "error": reason if to_status == "failed" else current.error}),
+                current.version,
+                expected_status=current.status,
+                fencing_token=self.fencing_token,
+                fencing_validator=self._fencing_validator,
+            )
+        except (ExecutionFencingConflictError, PermissionError):
             return commit
-        self.store.transition(current.execution_id, to_status, result=checkpoint if to_status == "completed" else current.result, error=reason if to_status == "failed" else current.error)
+        except Exception:
+            return commit
         self.audit_log.append(ExecutionAuditEvent(current.execution_id, current.status, to_status, current.attempt, reason, correlation_id=current.correlation_id, event_id=commit_id))
         self._mark(commit_id, "applied")
         return commit
@@ -177,7 +189,16 @@ class ExecutionCommitCoordinator:
                 continue
             if state.status != commit.from_status:
                 continue
-            self.store.transition(commit.execution_id, commit.to_status, result=commit.checkpoint if commit.to_status == "completed" else state.result, error=commit.reason if commit.to_status == "failed" else state.error)
+            try:
+                self.store.compare_and_set(
+                    ExecutionState(**{**asdict(state), "status": commit.to_status, "result": commit.checkpoint if commit.to_status == "completed" else state.result, "error": commit.reason if commit.to_status == "failed" else state.error}),
+                    state.version,
+                    expected_status=commit.from_status,
+                    fencing_token=self.fencing_token,
+                    fencing_validator=self._fencing_validator,
+                )
+            except (ExecutionFencingConflictError, PermissionError, Exception):
+                continue
             self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id))
             self._mark(commit.commit_id, "reconciled")
             repaired.append(commit.commit_id)
