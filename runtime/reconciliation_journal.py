@@ -7,6 +7,8 @@ from typing import Optional
 try: import fcntl
 except ImportError: fcntl = None
 
+SCHEMA_VERSION = 1
+
 @dataclass(frozen=True)
 class ReconciliationRecord:
     intent_key: str
@@ -14,6 +16,7 @@ class ReconciliationRecord:
     status: str = "pending"
     result: object = None
     updated_at: str = ""
+    schema_version: int = SCHEMA_VERSION
 
 class ReconciliationJournal:
     def __init__(self, path="data/reconciliation_journal.json"):
@@ -44,7 +47,14 @@ class ReconciliationJournal:
         if not isinstance(raw, dict): raise ValueError("invalid journal record")
         if raw.get("intent_key") != intent_key or "execution_id" not in raw or "status" not in raw:
             raise ValueError("invalid journal record")
-        return ReconciliationRecord(**raw)
+        version=raw.get("schema_version", SCHEMA_VERSION)
+        if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+            raise ValueError("invalid journal schema version")
+        if version > SCHEMA_VERSION:
+            raise ValueError("unsupported journal schema version")
+        migrated=dict(raw)
+        migrated["schema_version"]=SCHEMA_VERSION
+        return ReconciliationRecord(**migrated)
     def get(self,intent_key):
         with self._lock():
             raw=self._read().get(intent_key); return self._record(intent_key, raw) if raw else None
