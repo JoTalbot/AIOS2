@@ -40,7 +40,6 @@ class ToolSandbox:
             if not isinstance(tool_name, str) or not tool_name.strip():
                 raise ToolBoundaryError("tool name is required")
             call = ToolCall(tool=tool_name.strip(), arguments=dict(kwargs))
-
         if not isinstance(call.arguments, dict):
             raise ToolBoundaryError("tool arguments must be a mapping")
         if call.timeout is not None and (not isinstance(call.timeout, (int, float)) or call.timeout <= 0):
@@ -50,10 +49,7 @@ class ToolSandbox:
     async def execute(self, tool_name, context, *, execution_context=None, **kwargs):
         if not isinstance(context, ToolExecutionContext) or not context.agent_id:
             raise ToolBoundaryError("trusted agent identity is required")
-
         call = self._normalize_call(tool_name, kwargs)
-        # Context permissions are untrusted caller claims. Only the sandbox's
-        # server-side authorization map can grant privileged capabilities.
         granted = context.permissions & self.allowed_permissions(context.agent_id)
         self.audit.record("tool.execution.started", context.agent_id, call.tool)
         try:
@@ -61,11 +57,5 @@ class ToolSandbox:
             self.audit.record("tool.execution.completed", context.agent_id, call.tool)
             return result
         except Exception as exc:
-            self.audit.record(
-                "tool.execution.failed",
-                context.agent_id,
-                call.tool,
-                "error",
-                error=str(exc),
-            )
+            self.audit.record("tool.execution.failed", context.agent_id, call.tool, "error", error=str(exc))
             raise
