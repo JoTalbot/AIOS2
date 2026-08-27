@@ -1,39 +1,102 @@
 """HTTP transport for the operator recovery service."""
-from typing import Callable,Optional
+from typing import Callable, Optional, Literal
+
 from .recovery_api import RecoveryOperatorService
+
 try:
- from fastapi import APIRouter,Depends,HTTPException,Request
- from pydantic import BaseModel,Field
-except ImportError: APIRouter=None
+    from fastapi import APIRouter, Depends, HTTPException, Request
+    from pydantic import BaseModel, Field
+except ImportError:  # pragma: no cover
+    APIRouter = None
+
 if APIRouter is not None:
- class ResolveRequest(BaseModel):
-  execution_id:str=Field(min_length=1); action:str=Field(min_length=1); reason:Optional[str]=None
- class RetryRequest(BaseModel):
-  execution_id:str=Field(min_length=1); reason:Optional[str]=None
-def build_recovery_router(service:RecoveryOperatorService,authorize_operator:Optional[Callable]=None):
- if APIRouter is None: raise RuntimeError("FastAPI is required for the recovery HTTP transport")
- router=APIRouter(prefix="/recovery",tags=["operator-recovery"])
- def context(request:Request):
-  if authorize_operator is None: raise HTTPException(status_code=403,detail="operator authorization is not configured")
-  value=authorize_operator(request)
-  if not value: raise HTTPException(status_code=403,detail="operator authorization required")
-  return value
- @router.get("/queue")
- def queue(request:Request,action:Optional[str]=None): context(request); return service.list(action=action)
- @router.get("/quarantine")
- def quarantine(request:Request): context(request); return service.list(action="quarantine")
- @router.get("/manual-review")
- def manual_review(request:Request): context(request); return service.list(action="manual_review")
- @router.post("/resolve")
- def resolve(payload:ResolveRequest,request:Request):
-  operator=context(request); role=getattr(operator,"role",None)
-  if getattr(role,"value",role) not in {"operator","admin"}: raise HTTPException(status_code=403,detail="operator role required")
-  try: return service.resolve(payload.execution_id,payload.action,actor=operator.actor,reason=payload.reason,correlation_id=operator.correlation_id)
-  except KeyError as exc: raise HTTPException(status_code=404,detail=str(exc)) from exc
- @router.post("/retry")
- def retry(payload:RetryRequest,request:Request):
-  operator=context(request); role=getattr(operator,"role",None)
-  if getattr(role,"value",role) not in {"operator","admin"}: raise HTTPException(status_code=403,detail="operator role required")
-  try: return service.resolve(payload.execution_id,"retry",actor=operator.actor,reason=payload.reason,correlation_id=operator.correlation_id)
-  except KeyError as exc: raise HTTPException(status_code=404,detail=str(exc)) from exc
- return router
+    RecoveryAction = Literal["quarantine", "manual_review", "retry"]
+
+    class ResolveRequest(BaseModel):
+        execution_id: str = Field(min_length=1)
+        action: RecoveryAction
+        reason: Optional[str] = None
+
+    class RetryRequest(BaseModel):
+        execution_id: str = Field(min_length=1)
+        reason: Optional[str] = None
+
+
+def build_recovery_router(
+    service: RecoveryOperatorService,
+    authorize_operator: Optional[Callable] = None,
+):
+    if APIRouter is None:  # pragma: no cover
+        raise RuntimeError("FastAPI is required for the recovery HTTP transport")
+
+    router = APIRouter(prefix="/recovery", tags=["operator-recovery"])
+
+    def context(request: Request):
+        if authorize_operator is None:
+            raise HTTPException(
+                status_code=403,
+                detail="operator authorization is not configured",
+            )
+        value = authorize_operator(request)
+        if not value:
+            raise HTTPException(
+                status_code=403,
+                detail="operator authorization required",
+            )
+        return value
+
+    def require_operator(request: Request):
+        operator = context(request)
+        role = getattr(operator, "role", None)
+        role_value = getattr(role, "value", role)
+        if role_value not in {"operator", "admin"}:
+            raise HTTPException(status_code=403, detail="operator role required")
+        return operator
+
+    @router.get("/queue")
+    def queue(
+        request: Request,
+        action: Optional[RecoveryAction] = None,
+    ):
+        context(request)
+        return service.list(action=action)
+
+    @router.get("/quarantine")
+    def quarantine(request: Request):
+        context(request)
+        return service.list(action="quarantine")
+
+    @router.get("/manual-review")
+    def manual_review(request: Request):
+        context(request)
+        return service.list(action="manual_review")
+
+    @router.post("/resolve")
+    def resolve(payload: ResolveRequest, request: Request):
+        operator = require_operator(request)
+        try:
+            return service.resolve(
+                payload.execution_id,
+                payload.action,
+                actor=operator.actor,
+                reason=payload.reason,
+                correlation_id=operator.correlation_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.post("/retry")
+    def retry(payload: RetryRequest, request: Request):
+        operator = require_operator(request)
+        try:
+            return service.resolve(
+                payload.execution_id,
+                "retry",
+                actor=operator.actor,
+                reason=payload.reason,
+                correlation_id=operator.correlation_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return router
