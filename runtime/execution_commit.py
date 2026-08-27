@@ -10,6 +10,11 @@ from typing import Any, Optional
 from .execution_audit import ExecutionAuditEvent, ExecutionAuditLog
 from .execution_store import ExecutionState, ExecutionStore
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
+
 
 @dataclass(frozen=True)
 class ExecutionCommit:
@@ -39,42 +44,55 @@ class CorruptJournalError(ValueError):
     pass
 
 
-class ExecutionCommitCoordinator:
-    """Durable journal with explicit status, sequence and checksum validation."""
+class _JournalLock:
+    def __init__(self, path: Path):
+        self.path = path
+        self.handle = None
 
+    def __enter__(self):
+        self.path.touch(exist_ok=True)
+        self.handle = self.path.open("r+", encoding="utf-8")
+        if fcntl is not None:
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if fcntl is not None:
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+        self.handle.close()
+
+
+class ExecutionCommitCoordinator:
     def __init__(self, store: ExecutionStore, audit_log: ExecutionAuditLog, journal_path: str = "data/execution_commits.jsonl", quarantine_path: str = "data/execution_commits.quarantine.jsonl"):
         self.store = store
         self.audit_log = audit_log
         self.journal_path = Path(journal_path)
         self.quarantine_path = Path(quarantine_path)
         self.journal_path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_path = self.journal_path.with_suffix(self.journal_path.suffix + ".lock")
 
-    def _next_sequence(self):
+    def _next_sequence_unlocked(self):
         if not self.journal_path.exists():
             return 1
         maximum = 0
-        lines = self.journal_path.read_text(encoding="utf-8").splitlines()
-        for line in lines:
+        for line in self.journal_path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             try:
-                sequence = int(json.loads(line).get("sequence", 0))
+                maximum = max(maximum, int(json.loads(line).get("sequence", 0)))
             except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
                 continue
-            maximum = max(maximum, sequence)
-        return maximum + 1 if maximum else len(lines) + 1
+        return maximum + 1
 
-    def _append_journal(self, commit: ExecutionCommit):
-        commit = ExecutionCommit(**{**asdict(commit), "sequence": self._next_sequence()}).with_integrity()
-        with self.journal_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(asdict(commit), ensure_ascii=False, default=str) + "\n")
-            handle.flush()
-        return commit
-
-    def _rewrite(self, commits):
-        tmp = self.journal_path.with_suffix(self.journal_path.suffix + ".tmp")
-        tmp.write_text("".join(json.dumps(asdict(c.with_integrity()), ensure_ascii=False, default=str) + "\n" for c in commits), encoding="utf-8")
-        tmp.replace(self.journal_path)
+    def _append_journal(self, commit):
+        with _JournalLock(self.lock_path):
+            commit = ExecutionCommit(**{**asdict(commit), "sequence": self._next_sequence_unlocked()}).with_integrity()
+            with self.journal_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(asdict(commit), ensure_ascii=False, default=str) + "\n")
+                handle.flush()
+                import os
+                os.fsync(handle.fileno())
+            return commit
 
     def _read_journal(self):
         if not self.journal_path.exists():
@@ -95,20 +113,17 @@ class ExecutionCommitCoordinator:
                     raise CorruptJournalError(f"invalid journal integrity at sequence {expected}")
             except (json.JSONDecodeError, TypeError, KeyError, ValueError, CorruptJournalError) as exc:
                 self._quarantine(line, str(exc))
-                try:
-                    expected = max(expected + 1, int(raw.get("sequence", 0)) + 1)
-                except (AttributeError, TypeError, ValueError):
-                    expected += 1
+                expected = max(expected + 1, int(raw.get("sequence", 0)) + 1) if isinstance(raw, dict) else expected + 1
                 continue
             result.append(commit)
             expected = commit.sequence + 1
         return result
 
-    def _quarantine(self, line: str, reason: str):
+    def _quarantine(self, line, reason):
         with self.quarantine_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"reason": reason, "line": line, "quarantined_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False) + "\n")
 
-    def commit(self, state: ExecutionState, to_status: str, *, checkpoint=None, reason=None):
+    def commit(self, state, to_status, *, checkpoint=None, reason=None):
         current = self.store.get(state.execution_id) or state
         commit_id = f"{current.execution_id}:{current.attempt}:{to_status}:{current.correlation_id or ''}"
         existing = {c.commit_id: c for c in self.pending(all_statuses=True)}.get(commit_id)
@@ -120,13 +135,20 @@ class ExecutionCommitCoordinator:
         self._mark(commit_id, "applied")
         return commit
 
-    def _mark(self, commit_id: str, status: str):
-        commits = self._read_journal()
-        for i, commit in enumerate(commits):
-            if commit.commit_id == commit_id:
-                commits[i] = ExecutionCommit(**{**asdict(commit), "status": status}).with_integrity()
-                break
-        self._rewrite(commits)
+    def _mark(self, commit_id, status):
+        with _JournalLock(self.lock_path):
+            commits = self._read_journal()
+            for i, commit in enumerate(commits):
+                if commit.commit_id == commit_id:
+                    commits[i] = ExecutionCommit(**{**asdict(commit), "status": status}).with_integrity()
+                    break
+            tmp = self.journal_path.with_suffix(self.journal_path.suffix + ".tmp")
+            tmp.write_text("".join(json.dumps(asdict(c.with_integrity()), ensure_ascii=False, default=str) + "\n" for c in commits), encoding="utf-8")
+            with tmp.open("r+", encoding="utf-8") as handle:
+                handle.flush()
+                import os
+                os.fsync(handle.fileno())
+            tmp.replace(self.journal_path)
 
     def reconcile(self):
         repaired = []
