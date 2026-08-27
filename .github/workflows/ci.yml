@@ -2,7 +2,11 @@ name: CI
 
 on:
   push:
+    branches:
+      - canonical-execution
   pull_request:
+    branches:
+      - canonical-execution
   workflow_dispatch:
 
 concurrency:
