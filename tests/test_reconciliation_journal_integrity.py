@@ -22,4 +22,5 @@ def test_malformed_timestamp_is_not_compacted_or_reinterpreted(tmp_path):
     journal._write({"bad": {"status": "completed", "updated_at": "not-a-date"}})
 
     assert journal.compact() == 0
-    assert journal.get("bad").status == "completed"
+    with pytest.raises(ValueError, match="invalid journal record"):
+        journal.get("bad")
