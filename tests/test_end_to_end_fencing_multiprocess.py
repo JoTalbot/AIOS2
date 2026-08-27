@@ -28,7 +28,7 @@ def test_sigstop_after_claim_takeover_blocks_stale_terminal_commit(tmp_path):
     env = os.environ.copy()
     env["PYTHONPATH"] = os.getcwd()
     env.update(LEASES=leases_path, INTENTS=intents_path, MARKER=marker)
-    stale = subprocess.Popen([sys.executable, "-c", textwrap.dedent("""
+    stale_code = textwrap.dedent("""
         import os, signal
         from runtime.execution_lease import ExecutionLeaseStore
         from runtime.tool_intent_store import ToolIntentStore
@@ -44,24 +44,25 @@ def test_sigstop_after_claim_takeover_blocks_stale_terminal_commit(tmp_path):
         assert not leases.is_owner('k','worker-a',lease.fencing_token)
         assert intents.mark_claimed('k','worker-a',claim.claim_token,'completed') is None
         open(os.environ['MARKER'],'w').write('stale-rejected')
-    """))], env=env)
+    """)
+    stale = subprocess.Popen([sys.executable, "-c", stale_code], env=env)
     try:
         wait_marker(marker, "claimed")
         time.sleep(1.2)
-        live_code = """
-        import os
-        from runtime.execution_lease import ExecutionLeaseStore
-        from runtime.tool_intent_store import ToolIntentStore
-        from runtime.intent_recovery_worker import IntentRecoveryWorker
-        leases=ExecutionLeaseStore(os.environ['LEASES'], ttl_seconds=1)
-        intents=ToolIntentStore(os.environ['INTENTS'], claim_ttl_seconds=1,
-                                coordination_lock_path=leases.lock_path)
-        result=IntentRecoveryWorker(intents,leases,'worker-b').recover_one(
-            intents.get('k'), lambda item: ('completed', {'recovered': True}))
-        assert result.status == 'completed', result
-        open(os.environ['MARKER'],'w').write('takeover-completed')
-        """
-        live = subprocess.run([sys.executable, "-c", textwrap.dedent(live_code)], env=env, timeout=8)
+        live_code = textwrap.dedent("""
+            import os
+            from runtime.execution_lease import ExecutionLeaseStore
+            from runtime.tool_intent_store import ToolIntentStore
+            from runtime.intent_recovery_worker import IntentRecoveryWorker
+            leases=ExecutionLeaseStore(os.environ['LEASES'], ttl_seconds=1)
+            intents=ToolIntentStore(os.environ['INTENTS'], claim_ttl_seconds=1,
+                                    coordination_lock_path=leases.lock_path)
+            result=IntentRecoveryWorker(intents,leases,'worker-b').recover_one(
+                intents.get('k'), lambda item: ('completed', {'recovered': True}))
+            assert result.status == 'completed', result
+            open(os.environ['MARKER'],'w').write('takeover-completed')
+        """)
+        live = subprocess.run([sys.executable, "-c", live_code], env=env, timeout=8)
         assert live.returncode == 0
         wait_marker(marker, "takeover-completed")
         os.kill(stale.pid, signal.SIGCONT)
