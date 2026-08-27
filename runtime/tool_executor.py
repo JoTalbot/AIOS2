@@ -20,17 +20,14 @@ class ToolExecutor:
         await self._publish(TOOL_STARTED, ctx, {"tool": call.tool, "call_id": call.call_id})
         try:
             operation = self.sandbox.execute(call.tool, context, **call.arguments)
-            if call.timeout is not None:
-                value = await asyncio.wait_for(operation, timeout=call.timeout)
-            else:
-                value = await operation
+            value = await asyncio.wait_for(operation, timeout=call.timeout) if call.timeout is not None else await operation
             result = ToolResult.success(call, value)
             await self._publish(TOOL_COMPLETED, ctx, {"tool": call.tool, "call_id": call.call_id})
             return result
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            retryable = isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError))
+            retryable = isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError, RuntimeError)) and not isinstance(exc, PermissionError)
             result = ToolResult.failure(call, exc, retryable=retryable)
             await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": retryable})
             return result
