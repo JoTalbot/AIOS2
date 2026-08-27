@@ -10,6 +10,10 @@ from .execution_audit import ExecutionAuditEvent, ExecutionAuditLog
 from .execution_state_machine import ExecutionStateMachine
 
 
+class ExecutionStoreCorruptionError(RuntimeError):
+    """Raised when the execution store cannot be safely decoded."""
+
+
 @dataclass
 class ExecutionState:
     execution_id: str
@@ -26,7 +30,12 @@ class ExecutionState:
 class ExecutionStore:
     """Small atomic JSON store delegating lifecycle rules to the domain machine."""
 
-    def __init__(self, path: str = "data/executions.json", state_machine: Optional[ExecutionStateMachine] = None, audit_log: Optional[ExecutionAuditLog] = None):
+    def __init__(
+        self,
+        path: str = "data/executions.json",
+        state_machine: Optional[ExecutionStateMachine] = None,
+        audit_log: Optional[ExecutionAuditLog] = None,
+    ):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.state_machine = state_machine or ExecutionStateMachine()
@@ -36,16 +45,30 @@ class ExecutionStore:
 
     def _read(self) -> Dict[str, Any]:
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError):
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
             return {}
+        except json.JSONDecodeError as exc:
+            raise ExecutionStoreCorruptionError(
+                f"execution store contains invalid JSON: {self.path}"
+            ) from exc
+        if not isinstance(data, dict):
+            raise ExecutionStoreCorruptionError(
+                f"execution store root must be an object: {self.path}"
+            )
+        return data
 
     def _write(self, data: Dict[str, Any]) -> None:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
+        tmp.write_text(
+            json.dumps(data, ensure_ascii=False, default=str, indent=2),
+            encoding="utf-8",
+        )
         tmp.replace(self.path)
 
     def save(self, state: ExecutionState) -> ExecutionState:
+        if not state.execution_id or not isinstance(state.execution_id, str):
+            raise ValueError("execution_id must be a non-empty string")
         data = self._read()
         previous = data.get(state.execution_id)
         if previous:
@@ -55,7 +78,16 @@ class ExecutionStore:
         data[state.execution_id] = asdict(state)
         self._write(data)
         if self.audit_log and old_status != state.status:
-            self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", state.status, state.attempt, state.error, correlation_id=state.correlation_id))
+            self.audit_log.append(
+                ExecutionAuditEvent(
+                    state.execution_id,
+                    old_status or "new",
+                    state.status,
+                    state.attempt,
+                    state.error,
+                    correlation_id=state.correlation_id,
+                )
+            )
         return state
 
     def transition(self, execution_id: str, status: str, **updates) -> ExecutionState:
@@ -75,4 +107,8 @@ class ExecutionStore:
         return ExecutionState(**raw) if raw else None
 
     def resumable(self):
-        return [ExecutionState(**raw) for raw in self._read().values() if raw.get("status") in {"running", "retrying"}]
+        return [
+            ExecutionState(**raw)
+            for raw in self._read().values()
+            if raw.get("status") in {"running", "retrying"}
+        ]
