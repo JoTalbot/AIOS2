@@ -14,6 +14,10 @@ class ExecutionStoreCorruptionError(RuntimeError):
     """Raised when the execution store cannot be safely decoded."""
 
 
+class ExecutionVersionConflictError(RuntimeError):
+    """Raised when a compare-and-set write observes a newer execution version."""
+
+
 @dataclass
 class ExecutionState:
     execution_id: str
@@ -25,17 +29,13 @@ class ExecutionState:
     error: Optional[str] = None
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     correlation_id: Optional[str] = None
+    version: int = 0
 
 
 class ExecutionStore:
-    """Small atomic JSON store delegating lifecycle rules to the domain machine."""
+    """Small atomic JSON store with optimistic versioning and CAS updates."""
 
-    def __init__(
-        self,
-        path: str = "data/executions.json",
-        state_machine: Optional[ExecutionStateMachine] = None,
-        audit_log: Optional[ExecutionAuditLog] = None,
-    ):
+    def __init__(self, path: str = "data/executions.json", state_machine: Optional[ExecutionStateMachine] = None, audit_log: Optional[ExecutionAuditLog] = None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.state_machine = state_machine or ExecutionStateMachine()
@@ -49,45 +49,53 @@ class ExecutionStore:
         except FileNotFoundError:
             return {}
         except json.JSONDecodeError as exc:
-            raise ExecutionStoreCorruptionError(
-                f"execution store contains invalid JSON: {self.path}"
-            ) from exc
+            raise ExecutionStoreCorruptionError(f"execution store contains invalid JSON: {self.path}") from exc
         if not isinstance(data, dict):
-            raise ExecutionStoreCorruptionError(
-                f"execution store root must be an object: {self.path}"
-            )
+            raise ExecutionStoreCorruptionError(f"execution store root must be an object: {self.path}")
         return data
 
     def _write(self, data: Dict[str, Any]) -> None:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(
-            json.dumps(data, ensure_ascii=False, default=str, indent=2),
-            encoding="utf-8",
-        )
+        tmp.write_text(json.dumps(data, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
         tmp.replace(self.path)
 
+    @staticmethod
+    def _version(raw: Optional[Dict[str, Any]]) -> int:
+        if raw is None:
+            return 0
+        value = raw.get("version", 0)
+        if not isinstance(value, int) or value < 0:
+            raise ExecutionStoreCorruptionError("execution state has invalid version")
+        return value
+
     def save(self, state: ExecutionState) -> ExecutionState:
-        if not state.execution_id or not isinstance(state.execution_id, str):
+        return self._save(state, expected_version=None)
+
+    def compare_and_set(self, state: ExecutionState, expected_version: int) -> ExecutionState:
+        """Persist only if the stored version still equals expected_version."""
+        if not isinstance(expected_version, int) or expected_version < 0:
+            raise ValueError("expected_version must be a non-negative integer")
+        return self._save(state, expected_version=expected_version)
+
+    def _save(self, state: ExecutionState, expected_version: Optional[int]) -> ExecutionState:
+        if not isinstance(state.execution_id, str) or not state.execution_id:
             raise ValueError("execution_id must be a non-empty string")
         data = self._read()
         previous = data.get(state.execution_id)
+        current_version = self._version(previous)
+        if expected_version is not None and current_version != expected_version:
+            raise ExecutionVersionConflictError(
+                f"execution '{state.execution_id}' version changed: expected {expected_version}, found {current_version}"
+            )
         if previous:
             self.state_machine.validate(previous.get("status", "pending"), state.status)
         old_status = previous.get("status", "pending") if previous else None
+        state.version = current_version + 1
         state.updated_at = datetime.now(timezone.utc).isoformat()
         data[state.execution_id] = asdict(state)
         self._write(data)
         if self.audit_log and old_status != state.status:
-            self.audit_log.append(
-                ExecutionAuditEvent(
-                    state.execution_id,
-                    old_status or "new",
-                    state.status,
-                    state.attempt,
-                    state.error,
-                    correlation_id=state.correlation_id,
-                )
-            )
+            self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", state.status, state.attempt, state.error, correlation_id=state.correlation_id))
         return state
 
     def transition(self, execution_id: str, status: str, **updates) -> ExecutionState:
@@ -107,8 +115,4 @@ class ExecutionStore:
         return ExecutionState(**raw) if raw else None
 
     def resumable(self):
-        return [
-            ExecutionState(**raw)
-            for raw in self._read().values()
-            if raw.get("status") in {"running", "retrying"}
-        ]
+        return [ExecutionState(**raw) for raw in self._read().values() if raw.get("status") in {"running", "retrying"}]
