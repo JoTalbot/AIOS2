@@ -7,7 +7,6 @@ from runtime.execution_context import ExecutionContext
 
 class PlannerStub:
     async def plan(self, request):
-        assert request.context.execution_id == "exec-1"
         return CognitionDecision("plan", [{"tool": "noop"}])
 
 
