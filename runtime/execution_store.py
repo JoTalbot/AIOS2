@@ -58,6 +58,7 @@ class ExecutionStore:
         with _FileLock(self.lock_path):
             return self._read_unlocked()
     def _write(self,data):
+        tmp=self.path.with_suffix(self.suffix if hasattr(self, 'suffix') else self.path.suffix)
         tmp=self.path.with_suffix(self.path.suffix+".tmp")
         with tmp.open("w",encoding="utf-8") as h:
             json.dump(data,h,ensure_ascii=False,default=str,indent=2); h.flush(); import os; os.fsync(h.fileno())
@@ -93,5 +94,10 @@ class ExecutionStore:
         with _FileLock(self.lock_path): raw=self._read_unlocked().get(execution_id)
         return ExecutionState(**raw) if raw else None
     def resumable(self):
-        with _FileLock(self.lock_path): values=self._read_unlocked().values()
-        return [ExecutionState(**raw) for raw in values if raw.get("status") in {"running","retrying"}]
+        with _FileLock(self.lock_path): values=list(self._read_unlocked().values())
+        return [
+            ExecutionState(**raw)
+            for raw in values
+            if raw.get("status") in {"running", "retrying"}
+            or (raw.get("status") == "pending" and raw.get("attempt", 0) > 0)
+        ]
