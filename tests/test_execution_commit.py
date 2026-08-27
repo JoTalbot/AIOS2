@@ -1,3 +1,6 @@
+import dataclasses
+import json
+
 from runtime.execution_audit import ExecutionAuditLog
 from runtime.execution_commit import ExecutionCommit, ExecutionCommitCoordinator
 from runtime.execution_store import ExecutionState, ExecutionStore
@@ -34,9 +37,7 @@ def test_corrupt_line_does_not_poison_following_valid_sequence(tmp_path):
     first = ExecutionCommit("c1", "e1", "pending", "running", 0).with_integrity()
     second = ExecutionCommit("c2", "e1", "running", "completed", 0, sequence=2).with_integrity()
     journal.write_text(
-        "{malformed}\n"
-        + __import__("json").dumps(__import__("dataclasses").asdict(second))
-        + "\n",
+        "{malformed}\n" + json.dumps(dataclasses.asdict(second)) + "\n",
         encoding="utf-8",
     )
 
