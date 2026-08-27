@@ -10,7 +10,7 @@ async def test_audit_records_success_and_failure():
     registry = ToolRegistry()
     registry.register("add", lambda a, b: a + b, permissions={"compute"})
     audit = ExecutionAudit()
-    sandbox = ToolSandbox(registry, audit)
+    sandbox = ToolSandbox(registry, audit, authorization={"agent-1": {"compute"}})
     assert await sandbox.execute("add", ToolExecutionContext("agent-1", frozenset({"compute"})), a=1, b=2) == 3
     with pytest.raises(ToolPermissionError):
         await sandbox.execute("add", ToolExecutionContext("agent-1"), a=1, b=2)
