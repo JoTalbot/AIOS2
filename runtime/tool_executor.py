@@ -54,7 +54,7 @@ class ToolExecutor:
                 claimed_intent = True
             try:
                 result = await self._execute_once(call, context, execution_context)
-                if isinstance(result.error, asyncio.TimeoutError):
+                if result.ambiguous:
                     if claimed_intent and self.intent_store: self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
                     self._idempotent_results[key] = result
                     return result
@@ -101,7 +101,7 @@ class ToolExecutor:
             result = value if isinstance(value, ToolResult) else ToolResult.success(call, value)
             await self._publish(TOOL_COMPLETED, ctx, {"tool": call.tool, "call_id": call.call_id, "idempotency_key": call.idempotency_key}); return result
         except asyncio.TimeoutError as exc:
-            result = ToolResult.failure(call, exc, retryable=False)
+            result = ToolResult.failure(call, exc, retryable=False, ambiguous=True)
             await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": False, "ambiguous": True, "idempotency_key": call.idempotency_key})
             return result
         except asyncio.CancelledError: raise
