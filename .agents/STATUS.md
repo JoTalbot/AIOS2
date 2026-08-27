@@ -2,9 +2,9 @@
 
 ## Current phase
 - Phase: isolated new architecture hardening and integration
-- Branch: `batch/16-recovery-lease-fencing`
-- Latest integrated commit on `main`: `87bb83bf558931fe97fdae2040b4425c500e8273`
-- Active work commit: `6bb18b8358624d091540d57a685b38ab5b2a6520`
+- Branch: `batch/17-1-reconciliation-integration`
+- Latest integrated commit on `main`: `658fc0b821befc3872efe6c7a75694289ee108a8`
+- Active work commit: `77fbcf1cc7ecd89ec5de08b3249d477082cb975a`
 - Active PR: pending creation
 
 ## Current architecture work
@@ -17,19 +17,19 @@
 - Lease rotation after a post-CAS crash fences the stale worker and prevents stale reconciliation from reapplying the intent.
 - Durable tool intents use owner/claim-token fencing for recovery and terminal transitions.
 
-## Batch 16 — Recovery/Lease Fencing Hardening
-- Recovery lease scope now follows `execution_id` when present, falling back to the intent key for legacy intents.
-- Final lease ownership validation and terminal claim transition are performed under the lease coordination lock, closing the check-to-act fencing window.
-- Lease loss before terminal commit leaves the intent executing for safe recovery instead of allowing a stale worker to finalize it.
-- Added regression coverage for execution-scoped leases and deterministic lease rotation during reconciliation.
+## Batch 17.1 — Durable Recovery + Idempotent Reconciliation
+- Added durable `ReconciliationJournal` with atomic persistence and idempotent terminal transitions.
+- Integrated journal state into `IntentRecoveryWorker`.
+- Terminal journal records prevent replay of already reconciled side effects.
+- Added persistence, reopen, idempotency and terminal-replay regression coverage.
 
 ## Validation
-- Changes are committed on `batch/16-recovery-lease-fencing`.
+- Changes are committed on `batch/17-1-reconciliation-integration`.
 - Target: `main`.
 - GitHub Actions is the authoritative full-suite validation path.
 
 ## Next actions
-1. Create PR for Batch 16 and wait for GitHub Actions validation.
+1. Create PR for Batch 17.1 and wait for GitHub Actions validation.
 2. Fix any CI failures only on the owning branch.
 3. Merge only after required CI is green, then update this status on `main`.
 
