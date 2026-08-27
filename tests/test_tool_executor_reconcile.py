@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from runtime.tool_executor import ToolExecutor
+from runtime.tool_intent_store import ToolIntent, ToolIntentStore
 from runtime.tool_protocol import ToolCall, ToolResult
 
 
@@ -30,15 +31,11 @@ async def test_reconcile_failure_is_returned_without_persisting_success():
 
 
 @pytest.mark.asyncio
-async def test_reconcile_success_returns_result_and_persists_when_store_present():
+async def test_reconcile_success_returns_result_and_persists_when_store_present(tmp_path):
     class Store:
-        def __init__(self):
-            self.saved = []
-        def get(self, key):
-            return None
-        def put_if_absent(self, value):
-            self.saved.append(value)
-            return value
+        def __init__(self): self.saved = []
+        def get(self, key): return None
+        def put_if_absent(self, value): self.saved.append(value); return value
 
     store = Store()
     executor = ToolExecutor(DummySandbox(), idempotency_store=store)
@@ -48,6 +45,17 @@ async def test_reconcile_success_returns_result_and_persists_when_store_present(
     assert resolved is result
     assert len(store.saved) == 1
     assert store.saved[0].idempotency_key == "k"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_success_finalizes_unclaimed_intent(tmp_path):
+    path = tmp_path / "intents.json"
+    intent = ToolIntent("k", "c1", "write", {}, state="ambiguous")
+    store = ToolIntentStore(str(path)); store.prepare(intent)
+    executor = ToolExecutor(DummySandbox(), intent_store=store)
+    result = ToolResult.success(call(), "resolved")
+    assert await executor.reconcile_intent(intent, lambda _: result) is result
+    assert store.get("k").state == "completed"
 
 
 @pytest.mark.asyncio
