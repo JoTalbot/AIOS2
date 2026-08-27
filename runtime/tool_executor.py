@@ -13,7 +13,7 @@ from .event_types import TOOL_COMPLETED, TOOL_FAILED, TOOL_STARTED
 from .tool_idempotency_store import StoredToolResult, ToolIdempotencyStore
 from .tool_intent_store import ToolIntent, ToolIntentStore
 from .tool_protocol import ToolCall, ToolResult
-from .tool_sandbox import ToolBoundaryError, ToolExecutionContext, ToolSandbox
+from .tool_sandbox import ToolBoundaryError, ToolExecutionContext
 from .tool_registry import ToolPermissionError
 
 
@@ -28,6 +28,14 @@ class ToolExecutor:
             if intent_store and idempotency_store else None
         )
 
+    @staticmethod
+    def _stored_matches_call(stored: StoredToolResult, call: ToolCall) -> bool:
+        return (
+            stored.call_id == call.call_id
+            and stored.tool == call.tool
+            and (stored.arguments is None or stored.arguments == call.arguments)
+        )
+
     async def execute(self, call: ToolCall, context: ToolExecutionContext, execution_context: ExecutionContext | None = None) -> ToolResult:
         if not isinstance(call, ToolCall): raise ToolBoundaryError("typed ToolCall is required")
         if not isinstance(context, ToolExecutionContext) or not context.agent_id: raise ToolBoundaryError("trusted ToolExecutionContext is required")
@@ -40,6 +48,8 @@ class ToolExecutor:
             if self.idempotency_store:
                 stored = self.idempotency_store.get(key)
                 if stored:
+                    if not self._stored_matches_call(stored, call):
+                        raise ToolBoundaryError("idempotency key conflicts with stored tool call")
                     result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key); self._idempotent_results[key] = result; return result
             claim_owner, claim_token = f"executor:{uuid.uuid4().hex}", uuid.uuid4().hex
             claimed_intent = False
@@ -48,6 +58,8 @@ class ToolExecutor:
                 if intent.state in {"completed", "failed"} and self.idempotency_store:
                     stored = self.idempotency_store.get(key)
                     if stored:
+                        if not self._stored_matches_call(stored, call):
+                            raise ToolBoundaryError("idempotency key conflicts with stored tool call")
                         result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key); self._idempotent_results[key] = result; return result
                 claimed = self.intent_store.claim(key, claim_owner, claim_token)
                 if claimed is None:
@@ -55,6 +67,8 @@ class ToolExecutor:
                     if current and current.state in {"completed", "failed"} and self.idempotency_store:
                         stored = self.idempotency_store.get(key)
                         if stored:
+                            if not self._stored_matches_call(stored, call):
+                                raise ToolBoundaryError("idempotency key conflicts with stored tool call")
                             result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key); self._idempotent_results[key] = result; return result
                     return ToolResult.failure(call, RuntimeError("intent is already claimed"))
                 claimed_intent = True
@@ -72,7 +86,9 @@ class ToolExecutor:
                     result = self.execution_boundary.commit(call, result, claim_owner, claim_token)
                 else:
                     if self.idempotency_store:
-                        stored = self.idempotency_store.put_if_absent(StoredToolResult(key, call.call_id, call.tool, result.ok, result.value if result.ok else None, result.error))
+                        stored = self.idempotency_store.put_if_absent(StoredToolResult(key, call.call_id, call.tool, result.ok, result.value if result.ok else None, result.error, call.arguments))
+                        if not self._stored_matches_call(stored, call):
+                            raise ToolBoundaryError("idempotency key conflicts with stored tool call")
                         result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
                     if claimed_intent and self.intent_store:
                         self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed" if result.ok else "failed")
@@ -87,6 +103,8 @@ class ToolExecutor:
         if self.idempotency_store:
             stored = self.idempotency_store.get(intent.idempotency_key)
             if stored:
+                if not self._stored_matches_call(stored, ToolCall(intent.tool, intent.arguments, intent.call_id, idempotency_key=intent.idempotency_key)):
+                    raise ToolBoundaryError("idempotency key conflicts with stored tool intent")
                 if self.intent_store and not (intent.owner_id and intent.claim_token): self.intent_store.mark(intent.idempotency_key, "completed" if stored.ok else "failed")
                 return ToolResult(intent.call_id, intent.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
         result = resolver(intent)
@@ -94,7 +112,9 @@ class ToolExecutor:
         if result is None: return None
         if not isinstance(result, ToolResult): raise TypeError("resolver must return ToolResult or None")
         if self.idempotency_store:
-            stored = self.idempotency_store.put_if_absent(StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, result.ok, result.value if result.ok else None, result.error))
+            stored = self.idempotency_store.put_if_absent(StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, result.ok, result.value if result.ok else None, result.error, intent.arguments))
+            if not self._stored_matches_call(stored, ToolCall(intent.tool, intent.arguments, intent.call_id, idempotency_key=intent.idempotency_key)):
+                raise ToolBoundaryError("idempotency key conflicts with stored tool intent")
         if self.intent_store and not (intent.owner_id and intent.claim_token): self.intent_store.mark(intent.idempotency_key, "completed" if result.ok else "failed")
         return result
 
@@ -117,4 +137,4 @@ class ToolExecutor:
         except ToolPermissionError: raise
         except ToolBoundaryError: raise
         except Exception as exc:
-            result = ToolResult.failure(call, exc, retryable=True); await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": True, "idempotency_key": call.idempotency_key}); return result
+            result = ToolResult.failure(call, exc, retryable=True); await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": True, "ambiguous": False, "idempotency_key": call.idempotency_key}); return result
