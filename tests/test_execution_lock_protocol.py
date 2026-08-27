@@ -68,3 +68,21 @@ def test_lease_rotation_waits_for_coordinated_state_transition(tmp_path, monkeyp
     assert rotation_done.is_set()
     assert rotated[0] is not None
     assert store.get("e2").status == "completed"
+
+
+def test_store_cas_uses_configured_coordination_lock(tmp_path, monkeypatch):
+    shared = tmp_path / "execution.lock"
+    store = ExecutionStore(str(tmp_path / "executions.json"), coordination_lock_path=str(shared))
+    state = ExecutionState("e3", status="pending")
+    calls = []
+    original_lock = store.execution_lock
+
+    def observed_lock():
+        calls.append(True)
+        return original_lock()
+
+    monkeypatch.setattr(store, "execution_lock", observed_lock)
+    store.save(state)
+
+    assert calls == [True]
+    assert store.get("e3").version == 1
