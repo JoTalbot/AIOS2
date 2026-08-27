@@ -1,15 +1,14 @@
 """Startup orchestration for restart-safe AIOS runtime recovery."""
 import asyncio
+import inspect
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable
 
-from .execution_commit import ExecutionCommitCoordinator
 from .execution_lease import ExecutionLeaseStore
 from .execution_store import ExecutionStore
 from .recovery_manager import RecoveryManager
 from .recovery_policy import RecoveryAction, RecoveryPolicy
 from .recovery_queue import RecoveryQueue, RecoveryQueueItem
-
 
 @dataclass(frozen=True)
 class RecoveryReport:
@@ -23,7 +22,6 @@ class RecoveryReport:
     retried: int = 0
     quarantined: int = 0
     manual_review: int = 0
-
 
 class RuntimeBootstrap:
     def __init__(self, store=None, recovery_manager=None, lease_store=None, owner_id="aios-runtime", heartbeat_interval=None, commit_coordinator=None, recovery_policy=None, recovery_queue=None):
@@ -71,7 +69,9 @@ class RuntimeBootstrap:
                 continue
             heartbeat = asyncio.create_task(self._heartbeat(state.execution_id))
             try:
-                await resume(state)
+                outcome = resume(state)
+                if inspect.isawaitable(outcome):
+                    await outcome
                 recovered += 1
             except Exception as exc:
                 failed += 1
