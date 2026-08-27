@@ -1,6 +1,6 @@
 """Durable, idempotent journal for recovery reconciliation intents."""
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json, os
 from pathlib import Path
 from typing import Optional
@@ -35,7 +35,8 @@ class ReconciliationJournal:
         try:return json.loads(self.path.read_text(encoding="utf-8"))
         except FileNotFoundError:return {}
     def _write(self,data):
-        tmp=self.path.with_suffix(self.path.suffix+".tmp"); tmp.write_text(json.dumps(data,ensure_ascii=False,sort_keys=True,indent=2),encoding="utf-8")
+        tmp=self.path.with_suffix(self.path.suffix+".tmp")
+        tmp.write_text(json.dumps(data,ensure_ascii=False,sort_keys=True,indent=2),encoding="utf-8")
         with tmp.open("r+") as h:h.flush();os.fsync(h.fileno())
         tmp.replace(self.path)
     def get(self,intent_key):
@@ -55,3 +56,16 @@ class ReconciliationJournal:
             record=ReconciliationRecord(intent_key,raw.get("execution_id") if raw else None,status,result,datetime.now(timezone.utc).isoformat()); data[intent_key]=asdict(record); self._write(data); return record
     def pending(self):
         with self._lock():return [ReconciliationRecord(**r) for r in self._read().values() if r.get("status")=="pending"]
+    def compact(self, retention=timedelta(days=30), now=None):
+        """Remove only terminal records older than retention; pending records are never removed."""
+        cutoff=(now or datetime.now(timezone.utc))-retention
+        with self._lock():
+            data=self._read(); removed=0
+            for key, raw in list(data.items()):
+                if raw.get("status") not in {"completed","failed"}: continue
+                try: updated=datetime.fromisoformat(raw.get("updated_at", ""))
+                except (TypeError, ValueError): continue
+                if updated.tzinfo is None: updated=updated.replace(tzinfo=timezone.utc)
+                if updated < cutoff: del data[key]; removed += 1
+            if removed: self._write(data)
+            return removed
