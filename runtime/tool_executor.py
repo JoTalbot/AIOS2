@@ -9,7 +9,6 @@ from .event_types import TOOL_COMPLETED, TOOL_FAILED, TOOL_STARTED
 from .tool_protocol import ToolCall, ToolResult
 from .tool_sandbox import ToolExecutionContext, ToolSandbox
 
-
 class ToolExecutor:
     def __init__(self, sandbox: ToolSandbox, event_bus: EventBus | None = None):
         self.sandbox = sandbox
@@ -26,8 +25,10 @@ class ToolExecutor:
             return result
         except asyncio.CancelledError:
             raise
+        except PermissionError:
+            raise
         except Exception as exc:
-            retryable = isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError, RuntimeError)) and not isinstance(exc, PermissionError)
+            retryable = isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError, RuntimeError))
             result = ToolResult.failure(call, exc, retryable=retryable)
             await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": retryable})
             return result
