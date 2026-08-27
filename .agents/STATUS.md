@@ -4,7 +4,7 @@
 - Phase: isolated new architecture hardening and integration
 - Branch: `batch/lease-renewal-fencing`
 - Latest integrated commit: `19defd0e810afc4c2568de46f82928f6937f1d38`
-- Active work commit: `79befaafdf3ec51167d71cf770a61bd603f54a5f`
+- Active work commit: `885b32ee0374c7af7938e5ce9b515238f5fc06a4`
 
 ## Active agents
 
@@ -21,7 +21,7 @@
 | batch7/lease-sync | Multi-process lease synchronization | merged via PR #23 | completed |
 | batch7/observability | Structured recovery outcome | merged via PR #24 | completed |
 | batch7E/recovery-outcome-rebased | Harden stable recovery outcome contract | superseded by direct main hardening | completed |
-| batch/lease-renewal-fencing | Stale-owner lease renewal and bootstrap failure fencing | current branch | completed, awaiting CI |
+| batch/lease-renewal-fencing | Stale-owner lease renewal and bootstrap failure fencing | current branch | completed, awaiting fresh CI |
 
 ## Completed
 - Hardened execution state-machine validation and unknown-state handling.
@@ -39,6 +39,7 @@
 - Updated runtime bootstrap heartbeat to renew with its fencing token.
 - Updated bootstrap recovery failure persistence to pass the active lease to `RecoveryManager.mark_failed`, preventing stale workers from committing terminal failure state.
 - Added regression coverage for stale renewal using a re-acquired lease with the same owner ID.
+- Restored `ExecutionContext` compatibility export through `runtime.execution_store`.
 
 ## Current architecture work
 - vNext orchestration/execution path.
@@ -48,13 +49,14 @@
 
 ## Validation
 - Code and regression test changes are committed on `batch/lease-renewal-fencing`.
-- Local test execution is not available through the GitHub connector; the repository pytest workflow is the validation target after push/PR.
+- The previous pytest run used the PR merge-ref before the latest head commit and failed during collection on the now-restored `ExecutionContext` export.
+- Fresh CI must validate the current branch head before merge.
 
 ## Next actions
-1. Run/inspect repository-wide pytest CI for `batch/lease-renewal-fencing`.
-2. Audit recovery HTTP and runtime bootstrap paths for remaining fail-closed/contract-hardening gaps.
-3. Continue with atomic execution version + fencing CAS and crash-consistency fault injection.
-4. Open/merge the isolated branch after CI passes.
+1. Validate fresh repository-wide pytest CI for the current branch head.
+2. Audit recovery HTTP and runtime bootstrap paths for remaining fail-closed/contract-hardening gaps in parallel.
+3. Continue atomic execution version + fencing CAS and crash-consistency fault injection in parallel with CI.
+4. Merge the isolated branch only after required CI is green.
 5. Update status on `main` after integration.
 
 ## Rules
