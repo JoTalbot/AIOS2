@@ -39,7 +39,6 @@ async def test_recovery_rejects_lease_fenced_after_resume(tmp_path):
 
     outcomes = await manager.recover(_Loop(), object())
 
-    # Losing the lease after resume is a fencing outcome, not a worker failure.
     assert outcomes[0].status == "stale"
     assert store.get("e1").status == "running"
     assert leases.released is True
@@ -48,19 +47,18 @@ async def test_recovery_rejects_lease_fenced_after_resume(tmp_path):
 @pytest.mark.asyncio
 async def test_recovery_does_not_mark_failed_after_fencing_race(tmp_path):
     store = ExecutionStore(str(tmp_path / "executions.json"))
-    state = ExecutionState("e1", status="running", goal="resume")
-    store.save(state)
+    store.save(ExecutionState("e1", status="running", goal="resume"))
     leases = _LeaseStore()
     manager = RecoveryManager(store, leases, "worker-a")
 
-    # Force the failure path to verify mark_failed cannot cross the fencing boundary.
-    def fail_resume(*args, **kwargs):
-        raise RuntimeError("worker failure")
-
     class Loop:
-        resume = fail_resume
+        async def resume(self, execution_id, agent, context=None):
+            raise RuntimeError("worker failure")
 
     outcomes = await manager.recover(Loop(), object())
+
+    # The lease disappears while handling the worker exception, so the
+    # failure must not be persisted by the stale worker.
     assert outcomes[0].status == "stale"
     assert store.get("e1").status == "running"
     assert leases.released is True
