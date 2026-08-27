@@ -31,7 +31,7 @@ class RecoveryManager:
         for state in self.pending():
             try:
                 result = await loop.resume(state.execution_id, agent, context=context)
-            except BaseException as exc:
+            except Exception as exc:
                 self.mark_failed(state, exc)
                 if not continue_on_error:
                     raise
