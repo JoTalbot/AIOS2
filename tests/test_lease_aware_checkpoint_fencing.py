@@ -1,6 +1,6 @@
 import pytest
 
-from runtime.execution_checkpoint import RecoveryCheckpoint
+from runtime.recovery_checkpoint import RecoveryCheckpoint
 from runtime.execution_lease import ExecutionLeaseStore
 from runtime.execution_store import ExecutionState, ExecutionStore
 from runtime.lease_aware_checkpoint import LeaseAwareCheckpoint
