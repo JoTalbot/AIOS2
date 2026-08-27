@@ -13,7 +13,7 @@ class ExecutionAuditEvent:
         return ExecutionAuditEvent(**{**asdict(self),"event_id":hashlib.sha256(payload.encode()).hexdigest()})
 @dataclass
 class AuditEvent:
-    event:str; agent_id:str; tool:Optional[str]=None; status:str="ok"; metadata:Dict[str,Any]=field(default_factory=dict); timestamp:str=field(default_factory=lambda:datetime.now(timezone.utc).isoformat()); execution_id:Optional[str]=None; correlation_id:Optional[str]=None
+    event:str; agent_id:str; tool:Optional[str]=None; status:str="ok"; metadata:Dict[str,Any]=field(default_factory=dict); timestamp:str=field(default_factory=lambda: datetime.now(timezone.utc).isoformat()); execution_id:Optional[str]=None; correlation_id:Optional[str]=None
 class ExecutionAudit:
     def __init__(self, path: Optional[str]=None): self.events:List[AuditEvent]=[]; self.log=ExecutionAuditLog(path) if path else None
     def record(self,event,agent_id,tool=None,status="ok",context=None,correlation_id=None,**metadata):
@@ -28,6 +28,10 @@ class ExecutionAuditLog:
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True)
     def append(self,event):
         event=event.with_identity()
+        if self.path.exists():
+            for line in self.path.read_text(encoding="utf-8").splitlines():
+                if line.strip() and json.loads(line).get("event_id") == event.event_id:
+                    return ExecutionAuditEvent(**json.loads(line))
         with self.path.open("a",encoding="utf-8") as h: h.write(json.dumps(asdict(event),ensure_ascii=False)+"\n"); h.flush()
         return event
     def events(self,execution_id=None):
