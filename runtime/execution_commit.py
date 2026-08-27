@@ -58,16 +58,15 @@ class ExecutionCommitCoordinator:
         with _JournalLock(self.lock_path):return self._read_journal_unlocked()
     def _quarantine(self,line,reason):
         self.quarantine_path.parent.mkdir(parents=True,exist_ok=True)
-        with _JournalLock(self.lock_path):
-            if self.quarantine_path.exists():
-                for existing in self.quarantine_path.read_text(encoding="utf-8").splitlines():
-                    try:
-                        record=json.loads(existing)
-                        if record.get("line")==line and record.get("reason")==reason:return
-                    except (json.JSONDecodeError,TypeError):
-                        continue
-            with self.quarantine_path.open("a",encoding="utf-8") as h:
-                h.write(json.dumps({"reason":reason,"line":line,"quarantined_at":datetime.now(timezone.utc).isoformat()},ensure_ascii=False)+"\n");h.flush();os.fsync(h.fileno())
+        if self.quarantine_path.exists():
+            for existing in self.quarantine_path.read_text(encoding="utf-8").splitlines():
+                try:
+                    record=json.loads(existing)
+                    if record.get("line")==line and record.get("reason")==reason:return
+                except (json.JSONDecodeError,TypeError):
+                    continue
+        with self.quarantine_path.open("a",encoding="utf-8") as h:
+            h.write(json.dumps({"reason":reason,"line":line,"quarantined_at":datetime.now(timezone.utc).isoformat()},ensure_ascii=False)+"\n");h.flush();os.fsync(h.fileno())
     def _lease_valid_unlocked(self,execution_id):
         if self.lease_store is None:return True
         if not self.lease_owner_id or self.fencing_token is None:return False
