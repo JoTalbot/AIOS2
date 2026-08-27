@@ -4,7 +4,7 @@
 - Phase: isolated new architecture hardening and integration
 - Branch: `batch/recovery-http-hardening`
 - Latest integrated commit on `main`: `ec5ac30764bfa54ef66ac639f0c26ce369ce3f22`
-- Active work commit: `8626a2ae5ef1855373edd365e8055c4f69be7981`
+- Active work commit: `3a267843720bac8bf793a593366a742cef6a315b`
 
 ## Active agents
 
@@ -22,7 +22,7 @@
 | batch7/observability | Structured recovery outcome | merged via PR #24 | completed |
 | batch/lease-renewal-fencing | Stale-owner lease renewal and bootstrap failure fencing | merged via PR #38 | completed |
 | batch/atomic-cas-crash-hardening | Atomic execution CAS durability and recovery isolation | merged via PR #39 | completed |
-| batch/recovery-http-hardening | Recovery HTTP contract validation and centralized mutation RBAC | current branch | active |
+| batch/recovery-http-hardening | Recovery HTTP contract validation, centralized mutation RBAC, and execution-store fault injection | current branch | active |
 
 ## Completed
 - Hardened execution state-machine validation and unknown-state handling.
@@ -42,6 +42,7 @@
 - Added regression coverage for stale renewal using a re-acquired lease with the same owner ID.
 - Restored `ExecutionContext` compatibility export through `runtime.execution_store`.
 - Added optimistic execution-state CAS and atomic persistence hardening in the latest integrated batch.
+- Added fault-injection regression coverage for stale CAS writers and atomic replace failures.
 
 ## Current architecture work
 - vNext orchestration/execution path.
@@ -49,14 +50,15 @@
 - Persistence, checkpoint, recovery, leases and audit contracts.
 - CI has a full pytest workflow in addition to the security regression workflow.
 - Recovery HTTP transport now validates supported actions at the request boundary and uses one centralized operator-role guard for mutations.
+- Execution-store fault injection now covers CAS conflict and preservation of the last durable snapshot when atomic replacement fails.
 
 ## Validation
 - Recovery HTTP hardening implementation and focused regression tests are committed on `batch/recovery-http-hardening`.
-- The branch is based directly on current `main` after PR #39 integration.
-- GitHub Actions remains the authoritative full-suite validation path; local execution is not available through the GitHub connector.
+- Additional execution-store crash/CAS regression tests are committed on the same branch.
+- GitHub Actions is the authoritative full-suite validation path; local execution is not available through the GitHub connector.
 
 ## Next actions
-1. Open a PR for `batch/recovery-http-hardening` and validate its CI.
+1. Validate the expanded branch through GitHub Actions.
 2. Audit runtime bootstrap/recovery exception mapping for remaining fail-closed gaps.
 3. Continue crash-consistency fault injection around execution CAS + commit journal ordering.
 4. Merge only after required CI is green, then update this status on `main`.
