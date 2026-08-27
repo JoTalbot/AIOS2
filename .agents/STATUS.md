@@ -18,9 +18,10 @@
 - Extended `ExecutionCommitCoordinator` journal records with expected version and fencing generation.
 - Propagated the lease fencing generation from `LeaseAwareCheckpoint` into execution state/commit.
 - Added regression coverage for stale version and stale fencing races.
+- Added crash-window tests for journal→store and store→audit failure ordering, including idempotent reconciliation.
 
 ## P0 blockers
-1. Fault-injection crash consistency suite — GitHub issue #2.
+1. Complete fault-injection coverage for every commit ordering window.
 2. Complete atomic distributed persistence adapter — version/fencing CAS is now present in the file-backed boundary; production distributed adapter remains required.
 
 ## P1 work queue
