@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 from .execution_audit import ExecutionAuditEvent
+from .execution_context import ExecutionContext
 from .execution_state_machine import ExecutionStateMachine
 from .tool_protocol import ToolResult
 try:
