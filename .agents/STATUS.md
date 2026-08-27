@@ -13,10 +13,15 @@
 - Added roadmap covering P0/P1/P2/P3 completion.
 - Added ADRs for canonical execution authority, cognition/runtime boundary, derived events and file-backed persistence scope.
 - Created GitHub issues for the next P0/P1 architecture work.
+- Added monotonic `ExecutionState.version` with optimistic CAS in the persistence mutation boundary.
+- Added `ExecutionState.fencing_token` and stale fencing rejection in persistence.
+- Extended `ExecutionCommitCoordinator` journal records with expected version and fencing generation.
+- Propagated the lease fencing generation from `LeaseAwareCheckpoint` into execution state/commit.
+- Added regression coverage for stale version and stale fencing races.
 
 ## P0 blockers
-1. Atomic execution version + fencing CAS — GitHub issue #1.
-2. Fault-injection crash consistency suite — GitHub issue #2.
+1. Fault-injection crash consistency suite — GitHub issue #2.
+2. Complete atomic distributed persistence adapter — version/fencing CAS is now present in the file-backed boundary; production distributed adapter remains required.
 
 ## P1 work queue
 3. Unified capability/policy engine — issue #3.
