@@ -44,7 +44,7 @@ class RecoveryManager:
                     continue
                 result = await loop.resume(state.execution_id, agent, context=context)
             except Exception as exc:
-                self.mark_failed(state, exc)
+                self.mark_failed(state, exc, lease=lease)
                 recovered.append(RecoveryOutcome(state.execution_id, "failed"))
                 if not continue_on_error:
                     raise
@@ -57,7 +57,13 @@ class RecoveryManager:
             recovered.append(RecoveryOutcome(state.execution_id, "recovered"))
         return recovered
 
-    def mark_failed(self, state: ExecutionState, error: BaseException):
+    def mark_failed(self, state: ExecutionState, error: BaseException, *, lease=None):
+        """Persist recovery failure only while the caller still owns its lease."""
+        if lease is not None:
+            if self.lease_store is None or not self.lease_store.is_owner(
+                state.execution_id, self.owner_id, lease.fencing_token
+            ):
+                return False
         state.status = "failed"
         state.error = str(error)
-        return self.store.save(state)
+        return self.store.compare_and_set(state, state.version)
