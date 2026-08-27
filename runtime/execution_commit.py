@@ -40,6 +40,15 @@ class ExecutionCommit:
 class CorruptJournalError(ValueError):
     pass
 
+class ReconcileResult(list):
+    """Compatibility result: iterable repaired commit ids, numerically comparable as a count."""
+    def __eq__(self, other):
+        if isinstance(other, int):
+            return len(self) == other
+        return super().__eq__(other)
+    def __int__(self):
+        return len(self)
+
 class ExecutionCommitCoordinator:
     """The single lifecycle mutation boundary for durable executions."""
     def __init__(self, store: ExecutionStore, audit_log: Optional[ExecutionAuditLog] = None, journal_path: str = "data/execution_commits.jsonl", quarantine_path: str = "data/execution_commits.quarantine.jsonl"):
@@ -107,7 +116,7 @@ class ExecutionCommitCoordinator:
             if commit.commit_id==commit_id: result=ExecutionCommit(**{**asdict(commit),"status":status}).with_integrity(); commits[i]=result; break
         self._rewrite_unlocked(commits); return result
     def reconcile(self):
-        repaired=[]
+        repaired=ReconcileResult()
         with self._lock():
             for commit in [c for c in self._read_journal_unlocked() if c.status=="pending"]:
                 state=self.store.get(commit.execution_id)
