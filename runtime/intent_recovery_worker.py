@@ -1,6 +1,7 @@
-"""Lease-fenced reconciliation worker for ambiguous tool intents."""
+"""Lease- and claim-fenced reconciliation worker for ambiguous tool intents."""
 from dataclasses import dataclass
 from typing import Callable, Optional
+from uuid import uuid4
 
 from .execution_lease import ExecutionLeaseStore
 from .tool_intent_store import ToolIntentStore
@@ -24,13 +25,23 @@ class IntentRecoveryWorker:
         lease = self.lease_store.acquire(intent.idempotency_key, self.owner_id)
         if lease is None:
             return IntentRecoveryResult(intent.idempotency_key, "skipped_by_lease")
+        claim_token = uuid4().hex
+        claimed = self.store.claim(intent.idempotency_key, self.owner_id, claim_token)
+        if claimed is None:
+            self.lease_store.release(intent.idempotency_key, self.owner_id, lease.fencing_token)
+            return IntentRecoveryResult(intent.idempotency_key, "skipped_by_claim")
         try:
             if not self.lease_store.is_owner(intent.idempotency_key, self.owner_id, lease.fencing_token):
                 return IntentRecoveryResult(intent.idempotency_key, "skipped_by_lease")
-            status, _ = resolver(intent)
+            status, _ = resolver(claimed)
             if status in {"completed", "failed"}:
-                self.store.mark(intent.idempotency_key, status)
+                committed = self.store.mark_claimed(
+                    intent.idempotency_key, self.owner_id, claim_token, status
+                )
+                if committed is None:
+                    return IntentRecoveryResult(intent.idempotency_key, "skipped_by_claim")
                 return IntentRecoveryResult(intent.idempotency_key, status)
+            self.store.release_claim(intent.idempotency_key, self.owner_id, claim_token)
             return IntentRecoveryResult(intent.idempotency_key, "ambiguous", "resolver returned unknown state")
         finally:
             self.lease_store.release(intent.idempotency_key, self.owner_id, lease.fencing_token)
