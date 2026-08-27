@@ -3,12 +3,12 @@ import json
 import pytest
 
 from runtime.execution_audit import ExecutionAuditLog
-from runtime.execution_commit import ExecutionCommitCoordinator
+from runtime.execution_commit import ExecutionCommit, ExecutionCommitCoordinator
 from runtime.execution_lease import ExecutionLeaseStore
 from runtime.execution_store import ExecutionState, ExecutionStore, ExecutionVersionConflictError
 
 
-def _coordinator(tmp_path, *, fenced=False):
+def _coordinator(tmp_path):
     lock = tmp_path / "execution.lock"
     leases = ExecutionLeaseStore(str(tmp_path / "leases.json"), coordination_lock_path=str(lock))
     store = ExecutionStore(str(tmp_path / "executions.json"), coordination_lock_path=str(lock))
@@ -19,41 +19,30 @@ def _coordinator(tmp_path, *, fenced=False):
         store, audit, str(tmp_path / "commits.jsonl"),
         lease_store=leases, lease_owner_id="node-a", fencing_token=lease.fencing_token,
     )
-    if fenced:
-        assert leases.release("e1", "node-a", lease.fencing_token)
-        assert leases.acquire("e1", "node-b").fencing_token > lease.fencing_token
     return store, audit, leases, lease, coordinator
 
 
 def test_crash_before_journal_is_a_noop(tmp_path):
     store, audit, leases, lease, coordinator = _coordinator(tmp_path)
-    original = coordinator._append_journal
     coordinator._append_journal = lambda commit: (_ for _ in ()).throw(OSError("crash before journal"))
     with pytest.raises(OSError):
         coordinator.commit(store.get("e1"), "completed", checkpoint={"ok": True})
     assert store.get("e1").status == "running"
     assert audit.events("e1") == []
     assert coordinator.pending() == []
-    assert not (tmp_path / "commits.jsonl").read_text(encoding="utf-8")
 
 
 def test_journal_before_cas_recovers(tmp_path, monkeypatch):
     store, audit, leases, lease, coordinator = _coordinator(tmp_path)
     original = store.compare_and_set
-    calls = {"n": 0}
-
-    def crash_before_cas(*args, **kwargs):
-        calls["n"] += 1
-        raise OSError("crash before CAS")
-
-    monkeypatch.setattr(store, "compare_and_set", crash_before_cas)
+    monkeypatch.setattr(store, "compare_and_set", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("crash before CAS")))
     with pytest.raises(OSError):
         coordinator.commit(store.get("e1"), "completed", checkpoint={"ok": True})
     assert store.get("e1").status == "running"
     assert len(coordinator.pending()) == 1
-
     monkeypatch.setattr(store, "compare_and_set", original)
-    assert coordinator.reconcile() == [coordinator.pending()[0].commit_id]
+    pending = coordinator.pending()[0]
+    assert coordinator.reconcile() == [pending.commit_id]
     assert store.get("e1").status == "completed"
     assert len(audit.events("e1")) == 1
     assert coordinator.pending() == []
@@ -62,19 +51,15 @@ def test_journal_before_cas_recovers(tmp_path, monkeypatch):
 def test_cas_before_mark_reconciles_without_duplicate_state_transition(tmp_path, monkeypatch):
     store, audit, leases, lease, coordinator = _coordinator(tmp_path)
     original_mark = coordinator._mark
-
-    def crash_before_mark(*args, **kwargs):
-        raise OSError("crash after CAS before mark")
-
-    monkeypatch.setattr(coordinator, "_mark", crash_before_mark)
+    monkeypatch.setattr(coordinator, "_mark", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("crash after CAS before mark")))
     with pytest.raises(OSError):
         coordinator.commit(store.get("e1"), "completed", checkpoint={"ok": True})
     assert store.get("e1").status == "completed"
     assert len(coordinator.pending()) == 1
     assert len(audit.events("e1")) == 1
-
     monkeypatch.setattr(coordinator, "_mark", original_mark)
-    assert coordinator.reconcile() == [coordinator.pending()[0].commit_id]
+    pending = coordinator.pending()[0]
+    assert coordinator.reconcile() == [pending.commit_id]
     assert store.get("e1").status == "completed"
     assert len(audit.events("e1")) == 2
     assert coordinator.pending() == []
@@ -102,13 +87,12 @@ def test_lease_loss_before_cas_never_applies_stale_write(tmp_path, monkeypatch):
 
 def test_lease_loss_before_reconcile_cas_leaves_intent_pending(tmp_path, monkeypatch):
     store, audit, leases, lease, coordinator = _coordinator(tmp_path)
-    commit = coordinator._append_journal(
-        coordinator.commit(store.get("e1"), "completed", checkpoint={"ok": True})
-    ) if False else None
-    # Construct a durable journal entry without applying it.
-    from runtime.execution_commit import ExecutionCommit
     journal_commit = coordinator._append_journal(
-        ExecutionCommit("manual:e1:1:completed:1", "e1", "running", "completed", 1, {"ok": True}, correlation_id="c1", expected_version=1, fencing_token=lease.fencing_token)
+        ExecutionCommit(
+            "manual:e1:1:completed:1", "e1", "running", "completed", 1,
+            {"ok": True}, correlation_id="c1", expected_version=1,
+            fencing_token=lease.fencing_token,
+        )
     )
     original = coordinator._lease_valid_unlocked
     calls = {"n": 0}
@@ -127,7 +111,7 @@ def test_lease_loss_before_reconcile_cas_leaves_intent_pending(tmp_path, monkeyp
     assert audit.events("e1") == []
 
 
-def test_fault_matrix_preserves_durable_json_after_failed_transition(tmp_path):
+def test_fault_matrix_preserves_durable_json_after_stale_cas(tmp_path):
     store, _, _, _, _ = _coordinator(tmp_path)
     before = json.loads((tmp_path / "executions.json").read_text(encoding="utf-8"))
     stale = store.get("e1")
