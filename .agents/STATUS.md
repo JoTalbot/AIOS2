@@ -1,37 +1,35 @@
 # AIOS New Architecture — Shared Agent Status
 
 ## Current phase
-- Phase: isolated new architecture hardening and integration
-- Branch: `batch/17-1-reconciliation-integration`
-- Latest integrated commit on `main`: `658fc0b821befc3872efe6c7a75694289ee108a8`
-- Active work commit: `77fbcf1cc7ecd89ec5de08b3249d477082cb975a`
+- Phase: isolated new architecture hardening and Cognition/Runtime integration
+- Branch: `batch/18-cognition-runtime-boundary`
+- Latest integrated commit on `main`: `70bd953ab6c9a7a0ff9965a873a992e6c0131a80`
+- Active work commit: `168dab761fc7c7584e50a37957a1705c38f24254`
 - Active PR: pending creation
 
 ## Current architecture work
 - vNext orchestration/execution path.
-- Persistence, checkpoint, recovery, leases and audit contracts.
-- ExecutionStore and ExecutionLeaseStore share one execution-scoped coordination lock domain.
-- Commit/reconcile holds the shared lock across lease validation and version/status/fencing-aware CAS, preventing lease rotation between validation and state mutation.
-- Post-CAS crash leaves a durable pending intent; recovery appends the audit event by stable event identity and marks the journal intent reconciled/applied.
-- Audit append is idempotent by event identity, so a crash after audit append and before journal marking cannot create duplicates on repeated recovery.
-- Lease rotation after a post-CAS crash fences the stale worker and prevents stale reconciliation from reapplying the intent.
-- Durable tool intents use owner/claim-token fencing for recovery and terminal transitions.
+- Persistence, checkpoint, recovery, leases and audit contracts remain owned by Runtime.
+- Cognition is an ephemeral decision boundary over the canonical `ExecutionContext`.
+- Cognition components do not own stores, leases, checkpoints, recovery or tool execution.
+- Execution identity and lifecycle remain runtime-owned; cognition receives and returns decisions without durable side effects.
 
-## Batch 17.1 — Durable Recovery + Idempotent Reconciliation
-- Added durable `ReconciliationJournal` with atomic persistence and idempotent terminal transitions.
-- Integrated journal state into `IntentRecoveryWorker`.
-- Terminal journal records prevent replay of already reconciled side effects.
-- Added persistence, reopen, idempotency and terminal-replay regression coverage.
+## Batch 18 — Unified Cognition/Runtime Boundary
+- Added provider-independent cognition contracts for Planner, Evaluator, Reflector and Learner.
+- Added `CognitionRequest` and `CognitionDecision` bound to the canonical runtime `ExecutionContext`.
+- Added `CognitionPipeline` that composes cognition stages without introducing a second execution state path.
+- Added regression coverage proving one execution context flows through all cognition stages and runtime ownership is not duplicated.
 
 ## Validation
-- Changes are committed on `batch/17-1-reconciliation-integration`.
+- Focused tests added in `tests/test_cognition_boundary.py`.
+- GitHub Actions is authoritative; branch currently has no workflow run reported yet.
 - Target: `main`.
-- GitHub Actions is the authoritative full-suite validation path.
 
 ## Next actions
-1. Create PR for Batch 17.1 and wait for GitHub Actions validation.
+1. Create PR for Batch 18 and wait for GitHub Actions validation.
 2. Fix any CI failures only on the owning branch.
 3. Merge only after required CI is green, then update this status on `main`.
+4. Continue Batch 18 integration by adapting `VNextOrchestrator` to consume the cognition boundary without moving durable lifecycle ownership into Cognition.
 
 ## Rules
 Every agent updates this file before and after significant work. GitHub is the source of truth; do not rely on local chat history.
