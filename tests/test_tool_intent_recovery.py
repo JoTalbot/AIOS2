@@ -90,7 +90,6 @@ async def test_concurrent_recovery_with_lease_allows_one_fencing_owner(tmp_path)
 
 
 def test_recovery_claim_token_contains_lease_fencing_epoch(tmp_path):
-    import asyncio
     async def run():
         store = ToolIntentStore(str(tmp_path / "intents.json"))
         leases = ExecutionLeaseStore(str(tmp_path / "leases.json"))
