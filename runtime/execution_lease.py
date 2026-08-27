@@ -44,9 +44,16 @@ class ExecutionLeaseStore:
         token = int(current.get("fencing_token", 0)) + 1 if current else 1
         return self._store(execution_id, owner_id, data, now, token)
 
-    def renew(self, execution_id: str, owner_id: str) -> Optional[ExecutionLease]:
+    def renew(self, execution_id: str, owner_id: str, fencing_token: Optional[int] = None) -> Optional[ExecutionLease]:
+        """Renew only the currently held lease; a supplied token fences stale workers."""
         now = datetime.now(timezone.utc); data = self._read(); current = data.get(execution_id)
-        if not current or current["owner_id"] != owner_id or datetime.fromisoformat(current["expires_at"]) <= now: return None
+        if (
+            not current
+            or current["owner_id"] != owner_id
+            or (fencing_token is not None and current["fencing_token"] != fencing_token)
+            or datetime.fromisoformat(current["expires_at"]) <= now
+        ):
+            return None
         return self._store(execution_id, owner_id, data, now, int(current["fencing_token"]))
 
     def is_owner(self, execution_id: str, owner_id: str, fencing_token: Optional[int] = None) -> bool:
