@@ -12,9 +12,9 @@ def _coordinator(tmp_path, store, audit, leases, lease):
 def test_journal_replace_crash_preserves_old_pending_record_and_recovers(tmp_path, monkeypatch):
     leases=ExecutionLeaseStore(str(tmp_path/"leases.json")); store=ExecutionStore(str(tmp_path/"executions.json")); audit=ExecutionAuditLog(str(tmp_path/"audit.jsonl"))
     state=store.save(ExecutionState("e1",status="running",attempt=1,correlation_id="c1")); lease=leases.acquire("e1","node-a"); coordinator=_coordinator(tmp_path,store,audit,leases,lease)
-    journal_tmp=coordinator.journal_path.with_suffix(coordinator.journal_path.suffix+".tmp"); original_replace=type(journal_tmp).replace
+    journal_tmp=coordinator.journal_path.with_suffix(coordinator.journal_path.suffix+".tmp"); original_replace=type(journal_tmp).replace; injected=[False]
     def crash_replace(self,target):
-        if self == journal_tmp: raise OSError("simulated crash before journal replace")
+        if self == journal_tmp and not injected[0]: injected[0]=True; raise OSError("simulated crash before journal replace")
         return original_replace(self,target)
     monkeypatch.setattr(type(journal_tmp),"replace",crash_replace)
     with pytest.raises(OSError,match="before journal replace"): coordinator.commit(state,"completed",checkpoint={"ok":True})
