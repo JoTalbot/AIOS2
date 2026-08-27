@@ -17,7 +17,8 @@
 - Added `ExecutionState.fencing_token` and stale fencing rejection in persistence.
 - Extended `ExecutionCommitCoordinator` journal records with expected version and fencing generation.
 - Propagated the lease fencing generation from `LeaseAwareCheckpoint` into execution state/commit.
-- Added regression coverage for stale version and stale fencing races.
+- Removed the RecoveryCheckpoint direct-store lifecycle fallback; canonical committer is now mandatory.
+- Added deterministic concurrency regression coverage for stale version and stale fencing workers.
 - Added crash-window tests for journal→store and store→audit failure ordering, including idempotent reconciliation.
 
 ## P0 blockers
