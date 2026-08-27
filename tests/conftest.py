@@ -13,9 +13,23 @@ CHAOS_TEST_PREFIXES = (
     "test_tool_executor_multiprocess_chaos.py",
 )
 
+E2E_HINTS = ("e2e", "end_to_end", "full_autonomy")
+RUNTIME_HINTS = ("execution", "executor", "autonomous_loop", "loop_state", "recovery", "fencing", "ledger", "intent")
+INTEGRATION_HINTS = ("api", "auth", "config", "server", "http", "integration")
+
 
 def pytest_collection_modifyitems(config, items):
-    marker = pytest.mark.chaos
+    chaos = pytest.mark.chaos
     for item in items:
-        if item.path.name in CHAOS_TEST_PREFIXES:
-            item.add_marker(marker)
+        name = item.path.name.lower()
+        if name in CHAOS_TEST_PREFIXES:
+            item.add_marker(chaos)
+            continue
+        if any(hint in name for hint in E2E_HINTS):
+            item.add_marker(pytest.mark.e2e)
+        elif any(hint in name for hint in RUNTIME_HINTS):
+            item.add_marker(pytest.mark.runtime)
+        elif any(hint in name for hint in INTEGRATION_HINTS):
+            item.add_marker(pytest.mark.integration)
+        else:
+            item.add_marker(pytest.mark.unit)
