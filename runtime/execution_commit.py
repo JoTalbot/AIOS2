@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .execution_audit import ExecutionAuditEvent, ExecutionAuditLog
-from .execution_store import ExecutionState, ExecutionStore
+from .execution_store import ExecutionConcurrencyError, ExecutionState, ExecutionStore
 
 try:
     import fcntl
@@ -31,6 +31,8 @@ class ExecutionCommit:
     status: str = "pending"
     sequence: int = 0
     checksum: str = ""
+    expected_version: Optional[int] = None
+    fencing_token: Optional[int] = None
 
     def with_integrity(self):
         payload = asdict(self)
@@ -56,7 +58,6 @@ class ExecutionCommitCoordinator:
 
     @contextmanager
     def _lock(self):
-        """Serialize journal read-modify-write operations across processes."""
         with self.lock_path.open("a+", encoding="utf-8") as handle:
             if fcntl is not None:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
@@ -82,10 +83,6 @@ class ExecutionCommitCoordinator:
                 maximum = max(maximum, sequence)
         return maximum
 
-    def _max_sequence(self):
-        with self._lock():
-            return self._max_sequence_unlocked()
-
     def _append_journal_unlocked(self, commit: ExecutionCommit):
         self._read_journal_unlocked()
         next_sequence = self._max_sequence_unlocked() + 1
@@ -95,18 +92,10 @@ class ExecutionCommitCoordinator:
             handle.flush()
         return commit
 
-    def _append_journal(self, commit: ExecutionCommit):
-        with self._lock():
-            return self._append_journal_unlocked(commit)
-
     def _rewrite_unlocked(self, commits):
         tmp = self.journal_path.with_suffix(self.journal_path.suffix + ".tmp")
         tmp.write_text("".join(json.dumps(asdict(c.with_integrity()), ensure_ascii=False, default=str) + "\n" for c in commits), encoding="utf-8")
         tmp.replace(self.journal_path)
-
-    def _rewrite(self, commits):
-        with self._lock():
-            self._rewrite_unlocked(commits)
 
     def _read_journal_unlocked(self):
         if not self.journal_path.exists():
@@ -120,6 +109,8 @@ class ExecutionCommitCoordinator:
                 raw = json.loads(line)
                 raw.setdefault("status", "pending")
                 raw.setdefault("sequence", previous_sequence + 1)
+                raw.setdefault("expected_version", None)
+                raw.setdefault("fencing_token", None)
                 commit = ExecutionCommit(**raw)
                 if commit.sequence <= previous_sequence or commit.with_integrity().checksum != commit.checksum:
                     raise CorruptJournalError(f"invalid journal integrity at sequence {commit.sequence}")
@@ -130,32 +121,47 @@ class ExecutionCommitCoordinator:
             previous_sequence = commit.sequence
         return result
 
-    def _read_journal(self):
-        with self._lock():
-            return self._read_journal_unlocked()
-
     def _quarantine(self, line: str, reason: str):
         with self.quarantine_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"reason": reason, "line": line, "quarantined_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False) + "\n")
 
-    def commit(self, state: ExecutionState, to_status: str, *, checkpoint=None, reason=None, updates=None):
-        """Commit one validated lifecycle transition and its associated snapshot fields."""
+    def commit(self, state: ExecutionState, to_status: str, *, checkpoint=None, reason=None, updates=None, fencing_token: Optional[int] = None):
+        """Commit one validated lifecycle transition using optimistic CAS."""
         current = self.store.get(state.execution_id) or state
         updates = dict(updates or {})
         if to_status == "completed" and checkpoint is not None:
             updates.setdefault("result", checkpoint)
         if to_status == "failed" and reason is not None:
             updates.setdefault("error", reason)
-        commit_id = f"{current.execution_id}:{current.attempt}:{current.status}:{to_status}:{current.correlation_id or ''}"
-        existing = {c.commit_id: c for c in self.pending(all_statuses=True)}.get(commit_id)
-        if existing:
-            return existing
+        expected_version = current.version
+        effective_fence = fencing_token if fencing_token is not None else current.fencing_token
+        commit_id = f"{current.execution_id}:{current.attempt}:{current.status}:{to_status}:{expected_version}:{effective_fence}:{current.correlation_id or ''}"
         with self._lock():
             existing = {c.commit_id: c for c in self._read_journal_unlocked() if c.commit_id == commit_id}
             if existing:
                 return next(iter(existing.values()))
-            commit = self._append_journal_unlocked(ExecutionCommit(commit_id, current.execution_id, current.status, to_status, current.attempt, checkpoint, reason, correlation_id=current.correlation_id))
-            self.store.transition(current.execution_id, to_status, _audit=False, **updates)
+            commit = self._append_journal_unlocked(
+                ExecutionCommit(
+                    commit_id,
+                    current.execution_id,
+                    current.status,
+                    to_status,
+                    current.attempt,
+                    checkpoint,
+                    reason,
+                    correlation_id=current.correlation_id,
+                    expected_version=expected_version,
+                    fencing_token=effective_fence,
+                )
+            )
+            self.store.transition(
+                current.execution_id,
+                to_status,
+                _audit=False,
+                expected_version=expected_version,
+                fencing_token=effective_fence,
+                **updates,
+            )
             self.audit_log.append(ExecutionAuditEvent(current.execution_id, current.status, to_status, current.attempt, reason, correlation_id=current.correlation_id, event_id=commit_id))
             self._mark_unlocked(commit_id, "applied")
             return commit
@@ -168,10 +174,6 @@ class ExecutionCommitCoordinator:
                 break
         self._rewrite_unlocked(commits)
 
-    def _mark(self, commit_id: str, status: str):
-        with self._lock():
-            self._mark_unlocked(commit_id, status)
-
     def reconcile(self):
         repaired = []
         with self._lock():
@@ -179,12 +181,12 @@ class ExecutionCommitCoordinator:
                 state = self.store.get(commit.execution_id)
                 if not state:
                     continue
-                if state.status == commit.to_status:
+                if state.status == commit.to_status and state.version > (commit.expected_version or -1):
                     self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id))
                     self._mark_unlocked(commit.commit_id, "reconciled")
                     repaired.append(commit.commit_id)
                     continue
-                if state.status != commit.from_status:
+                if state.status != commit.from_status or state.version != (commit.expected_version or state.version):
                     continue
                 updates = {}
                 if commit.to_status == "completed":
@@ -192,7 +194,10 @@ class ExecutionCommitCoordinator:
                     updates["error"] = None
                 elif commit.to_status == "failed":
                     updates["error"] = commit.reason
-                self.store.transition(commit.execution_id, commit.to_status, _audit=False, **updates)
+                try:
+                    self.store.transition(commit.execution_id, commit.to_status, _audit=False, expected_version=commit.expected_version, fencing_token=commit.fencing_token, **updates)
+                except ExecutionConcurrencyError:
+                    continue
                 self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id))
                 self._mark_unlocked(commit.commit_id, "reconciled")
                 repaired.append(commit.commit_id)
@@ -201,3 +206,7 @@ class ExecutionCommitCoordinator:
     def pending(self, all_statuses=False):
         commits = self._read_journal()
         return commits if all_statuses else [c for c in commits if c.status == "pending"]
+
+    def _read_journal(self):
+        with self._lock():
+            return self._read_journal_unlocked()
