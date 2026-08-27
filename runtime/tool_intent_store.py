@@ -82,15 +82,14 @@ class ToolIntentStore:
             expiry=raw.get("claim_expires_at")
             if not expiry or datetime.fromisoformat(expiry)<=datetime.now(timezone.utc):return None
             raw["state"],raw["owner_id"],raw["claim_token"],raw["claim_expires_at"]=state,None,None,None; self._write(data); return ToolIntent(**raw)
-    def finalize_from_journal(self,key,owner_id,fencing_token,state):
-        """Finalize a stale claim only when its token belongs to the current fenced owner."""
+    def finalize_from_journal(self,key,state):
+        """Finalize an ambiguous intent after a terminal journal record is durable."""
         if state not in {"completed", "failed"}: raise ValueError("journal finalization requires a terminal state")
-        prefix=f"recovery:{owner_id}:{fencing_token}:"
         with _IntentLock(self.lock_path):
             data=self._read(); raw=data.get(key)
             if raw is None:return None
             if raw.get("state") in {"completed","failed"}: return ToolIntent(**raw)
-            if raw.get("owner_id")!=owner_id or not str(raw.get("claim_token") or "").startswith(prefix): return None
+            if raw.get("state") not in AMBIGUOUS_STATES:return None
             raw["state"],raw["owner_id"],raw["claim_token"],raw["claim_expires_at"]=state,None,None,None; self._write(data); return ToolIntent(**raw)
     def mark(self,key,state):
         if state not in AMBIGUOUS_STATES | {"completed","failed"}: raise ValueError("invalid intent state")
@@ -103,7 +102,7 @@ class ToolIntentStore:
     def pending(self):
         with _IntentLock(self.lock_path):return [ToolIntent(**raw) for raw in self._read().values() if raw.get("state") in AMBIGUOUS_STATES]
     def _write(self,data):
-        tmp=self.path.with_suffix(self.suffix if False else self.path.suffix+".tmp")
+        tmp=self.path.with_suffix(self.path.suffix+".tmp")
         tmp.write_text(json.dumps(data,ensure_ascii=False,default=str,indent=2),encoding="utf-8")
         with tmp.open("r+",encoding="utf-8") as h:h.flush(); import os; os.fsync(h.fileno())
         tmp.replace(self.path)
