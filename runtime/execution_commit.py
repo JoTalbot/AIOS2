@@ -63,11 +63,14 @@ class _JournalLock:
 
 
 class ExecutionCommitCoordinator:
-    def __init__(self, store: ExecutionStore, audit_log: ExecutionAuditLog, journal_path: str = "data/execution_commits.jsonl", quarantine_path: str = "data/execution_commits.quarantine.jsonl"):
+    def __init__(self, store: ExecutionStore, audit_log: ExecutionAuditLog, journal_path: str = "data/execution_commits.jsonl", quarantine_path: str = "data/execution_commits.quarantine.jsonl", lease_store=None, lease_owner_id: Optional[str] = None, fencing_token: Optional[int] = None):
         self.store = store
         self.audit_log = audit_log
         self.journal_path = Path(journal_path)
         self.quarantine_path = Path(quarantine_path)
+        self.lease_store = lease_store
+        self.lease_owner_id = lease_owner_id
+        self.fencing_token = fencing_token
         self.journal_path.parent.mkdir(parents=True, exist_ok=True)
         self.lock_path = self.journal_path.with_suffix(self.journal_path.suffix + ".lock")
 
@@ -123,13 +126,24 @@ class ExecutionCommitCoordinator:
         with self.quarantine_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"reason": reason, "line": line, "quarantined_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False) + "\n")
 
+    def _lease_valid(self, execution_id):
+        if self.lease_store is None:
+            return True
+        if not self.lease_owner_id or self.fencing_token is None:
+            return False
+        return self.lease_store.is_owner(execution_id, self.lease_owner_id, self.fencing_token)
+
     def commit(self, state, to_status, *, checkpoint=None, reason=None):
         current = self.store.get(state.execution_id) or state
+        if not self._lease_valid(current.execution_id):
+            raise PermissionError("execution lease is not held by the current fencing token")
         commit_id = f"{current.execution_id}:{current.attempt}:{to_status}:{current.correlation_id or ''}"
         existing = {c.commit_id: c for c in self.pending(all_statuses=True)}.get(commit_id)
         if existing:
             return existing
         commit = self._append_journal(ExecutionCommit(commit_id, current.execution_id, current.status, to_status, current.attempt, checkpoint, reason, correlation_id=current.correlation_id))
+        if not self._lease_valid(current.execution_id):
+            return commit
         self.store.transition(current.execution_id, to_status, result=checkpoint if to_status == "completed" else current.result, error=reason if to_status == "failed" else current.error)
         self.audit_log.append(ExecutionAuditEvent(current.execution_id, current.status, to_status, current.attempt, reason, correlation_id=current.correlation_id, event_id=commit_id))
         self._mark(commit_id, "applied")
@@ -154,7 +168,7 @@ class ExecutionCommitCoordinator:
         repaired = []
         for commit in self.pending():
             state = self.store.get(commit.execution_id)
-            if not state:
+            if not state or not self._lease_valid(commit.execution_id):
                 continue
             if state.status == commit.to_status:
                 self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id))
