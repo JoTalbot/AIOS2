@@ -21,6 +21,8 @@ class ToolIntent:
     execution_id: Optional[str] = None
     state: str = "prepared"
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    owner_id: Optional[str] = None
+    claim_token: Optional[str] = None
 
 class _IntentLock:
     def __init__(self, path: Path): self.path, self.handle = path, None
@@ -51,6 +53,21 @@ class ToolIntentStore:
             data=self._read(); raw=data.get(intent.idempotency_key)
             if raw: return ToolIntent(**raw)
             data[intent.idempotency_key]=asdict(intent); self._write(data); return intent
+    def claim(self, key: str, owner_id: str, claim_token: str):
+        if not key or not owner_id or not claim_token: raise ValueError("key, owner_id and claim_token are required")
+        with _IntentLock(self.lock_path):
+            data=self._read(); raw=data.get(key)
+            if raw is None or raw.get("state") not in AMBIGUOUS_STATES: return None
+            if raw.get("owner_id") not in (None, owner_id) or raw.get("claim_token") not in (None, claim_token): return None
+            raw["owner_id"], raw["claim_token"], raw["state"] = owner_id, claim_token, "executing"
+            self._write(data); return ToolIntent(**raw)
+    def release_claim(self, key: str, owner_id: str, claim_token: str, state="ambiguous"):
+        if state not in AMBIGUOUS_STATES: raise ValueError("release state must be ambiguous")
+        with _IntentLock(self.lock_path):
+            data=self._read(); raw=data.get(key)
+            if raw is None or raw.get("owner_id") != owner_id or raw.get("claim_token") != claim_token: return False
+            raw["owner_id"], raw["claim_token"], raw["state"] = None, None, state
+            self._write(data); return True
     def mark(self, key, state):
         if state not in VALID_STATES: raise ValueError("invalid intent state")
         with _IntentLock(self.lock_path):
@@ -58,10 +75,8 @@ class ToolIntentStore:
             if raw is None: return None
             raw["state"]=state; self._write(data); return ToolIntent(**raw)
     def pending(self):
-        with _IntentLock(self.lock_path):
-            return [ToolIntent(**raw) for raw in self._read().values() if raw.get("state") in AMBIGUOUS_STATES]
+        with _IntentLock(self.lock_path): return [ToolIntent(**raw) for raw in self._read().values() if raw.get("state") in AMBIGUOUS_STATES]
     def _write(self,data):
         tmp=self.path.with_suffix(self.path.suffix+".tmp"); tmp.write_text(json.dumps(data,ensure_ascii=False,default=str,indent=2),encoding="utf-8")
-        with tmp.open("r+",encoding="utf-8") as h:
-            h.flush(); import os; os.fsync(h.fileno())
+        with tmp.open("r+",encoding="utf-8") as h: h.flush(); import os; os.fsync(h.fileno())
         tmp.replace(self.path)
