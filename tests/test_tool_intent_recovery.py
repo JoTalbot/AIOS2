@@ -101,3 +101,26 @@ async def test_concurrent_recovery_with_lease_allows_one_fencing_owner(tmp_path)
     assert statuses == {"recovered", "skipped_by_lease"}
     assert resolver.calls == 1
     assert store.get(intent.idempotency_key).state == "completed"
+
+
+def test_recovery_claim_token_contains_lease_fencing_epoch(tmp_path):
+    import asyncio
+    from runtime.execution_lease import ExecutionLeaseStore
+    from runtime.tool_intent_store import ToolIntent, ToolIntentStore
+    from runtime.intent_recovery_worker import IntentRecoveryWorker
+
+    async def run():
+        path = str(tmp_path / "intents.json")
+        lease_path = str(tmp_path / "leases.json")
+        store = ToolIntentStore(path)
+        leases = ExecutionLeaseStore(lease_path)
+        store.prepare(ToolIntent("k", "c", "write", {}, "exec"))
+        worker = IntentRecoveryWorker(store, leases, "worker-a")
+        captured = {}
+        def resolver(item):
+            captured["token"] = item.claim_token
+            return "completed", {"ok": True}
+        result = worker.recover_one(store.get("k"), resolver)
+        assert result.status == "completed"
+        assert captured["token"].startswith("recovery:worker-a:1:")
+    asyncio.run(run())
