@@ -1,5 +1,6 @@
 """Startup orchestration for restart-safe AIOS runtime recovery."""
 import asyncio
+import inspect
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 from .execution_store import ExecutionStore
@@ -20,8 +21,8 @@ class RuntimeBootstrap:
             await asyncio.sleep(self.heartbeat_interval)
             renewed = self.lease_store.renew(execution_id, self.owner_id, fencing_token) if fencing_token is not None else self.lease_store.renew(execution_id, self.owner_id)
             if renewed is None: raise RuntimeError(f"execution lease lost: {execution_id}")
-            owned = self.lease_store.is_owner(execution_id, self.owner_id, fencing_token) if fencing_token is not None else self.lease_store.is_owner(execution_id, self.owner_id)
-            if not owned: raise RuntimeError(f"execution lease fenced: {execution_id}")
+            if fencing_token is not None and not self.lease_store.is_owner(execution_id, self.owner_id, fencing_token):
+                raise RuntimeError(f"execution lease fenced: {execution_id}")
     def _reconcile(self):
         if self.commit_coordinator is None: return 0,0
         try: return len(self.commit_coordinator.reconcile()),0
@@ -38,9 +39,12 @@ class RuntimeBootstrap:
             fencing_token=getattr(lease,"fencing_token",None)
             heartbeat=asyncio.create_task(self._heartbeat(state.execution_id,fencing_token)) if fencing_token is not None else None
             try:
-                owned=self.lease_store.is_owner(state.execution_id,self.owner_id,fencing_token) if fencing_token is not None else self.lease_store.is_owner(state.execution_id,self.owner_id)
-                if not owned: skipped+=1; continue
-                await resume(state); recovered+=1
+                if fencing_token is not None and not self.lease_store.is_owner(state.execution_id,self.owner_id,fencing_token):
+                    skipped+=1; continue
+                result = resume(state)
+                if inspect.isawaitable(result):
+                    await result
+                recovered+=1
             except Exception as exc: failed+=1; self.recovery_manager.mark_failed(state,exc,lease=lease)
             finally:
                 if heartbeat is not None:
