@@ -73,6 +73,17 @@ class ToolIntentStore:
             if raw is None or raw.get("owner_id") != owner_id or raw.get("claim_token") != claim_token: return False
             raw["owner_id"], raw["claim_token"], raw["claim_expires_at"], raw["state"] = None, None, None, state
             self._write(data); return True
+    def mark_claimed(self, key: str, owner_id: str, claim_token: str, state: str):
+        if state not in VALID_STATES: raise ValueError("invalid intent state")
+        if state in AMBIGUOUS_STATES: raise ValueError("mark_claimed is for terminal transitions")
+        with _IntentLock(self.lock_path):
+            data=self._read(); raw=data.get(key)
+            if raw is None or raw.get("owner_id") != owner_id or raw.get("claim_token") != claim_token:
+                return None
+            expiry=raw.get("claim_expires_at")
+            if not expiry or datetime.fromisoformat(expiry) <= datetime.now(timezone.utc): return None
+            raw["state"], raw["owner_id"], raw["claim_token"], raw["claim_expires_at"] = state, None, None, None
+            self._write(data); return ToolIntent(**raw)
     def mark(self, key, state):
         if state not in VALID_STATES: raise ValueError("invalid intent state")
         with _IntentLock(self.lock_path):
