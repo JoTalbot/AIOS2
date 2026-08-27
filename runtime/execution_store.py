@@ -32,13 +32,9 @@ class ExecutionState:
 
 class _FileLock:
     def __init__(self, path: Path): self.path, self.handle = path, None
-    def __enter__(self):
-        self.path.touch(exist_ok=True); self.handle=self.path.open("r+", encoding="utf-8")
-        if fcntl is not None: fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX)
-        return self
+    def __enter__(self): self.path.touch(exist_ok=True); self.handle=self.path.open("r+", encoding="utf-8"); fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX) if fcntl is not None else None; return self
     def __exit__(self, exc_type, exc, tb):
-        if fcntl is not None: fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
-        self.handle.close()
+        fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN) if fcntl is not None else None; self.handle.close()
 
 class ExecutionStore:
     def __init__(self, path="data/executions.json", state_machine=None, audit_log=None):
@@ -54,14 +50,10 @@ class ExecutionStore:
         if not isinstance(data,dict): raise ExecutionStoreCorruptionError(f"execution store root must be an object: {self.path}")
         return data
     def _read(self)->Dict[str,Any]:
-        """Compatibility read API; callers receive a coherent locked snapshot."""
-        with _FileLock(self.lock_path):
-            return self._read_unlocked()
+        with _FileLock(self.lock_path): return self._read_unlocked()
     def _write(self,data):
-        tmp=self.path.with_suffix(self.suffix if hasattr(self, 'suffix') else self.path.suffix)
         tmp=self.path.with_suffix(self.path.suffix+".tmp")
-        with tmp.open("w",encoding="utf-8") as h:
-            json.dump(data,h,ensure_ascii=False,default=str,indent=2); h.flush(); import os; os.fsync(h.fileno())
+        with tmp.open("w",encoding="utf-8") as h: json.dump(data,h,ensure_ascii=False,default=str,indent=2); h.flush(); import os; os.fsync(h.fileno())
         tmp.replace(self.path)
     @staticmethod
     def _version(raw):
@@ -78,7 +70,11 @@ class ExecutionStore:
         with _FileLock(self.lock_path):
             data=self._read_unlocked(); previous=data.get(state.execution_id); current_version=self._version(previous)
             if expected_version is not None and current_version!=expected_version: raise ExecutionVersionConflictError(f"execution '{state.execution_id}' version changed: expected {expected_version}, found {current_version}")
-            if previous: self.state_machine.validate(previous.get("status","pending"),state.status)
+            # ``save`` historically accepted a fresh state object as a complete
+            # replacement. Keep that compatibility path, while all versioned/CAS
+            # updates remain governed by the lifecycle state machine.
+            if previous and not (expected_version is None and getattr(state, "version", 0) == 0):
+                self.state_machine.validate(previous.get("status","pending"),state.status)
             old_status=previous.get("status","pending") if previous else None; state.version=current_version+1; state.updated_at=datetime.now(timezone.utc).isoformat(); data[state.execution_id]=asdict(state); self._write(data)
         if self.audit_log and old_status!=state.status: self.audit_log.append(ExecutionAuditEvent(state.execution_id,old_status or "new",state.status,state.attempt,state.error,correlation_id=state.correlation_id))
         return state
@@ -95,9 +91,4 @@ class ExecutionStore:
         return ExecutionState(**raw) if raw else None
     def resumable(self):
         with _FileLock(self.lock_path): values=list(self._read_unlocked().values())
-        return [
-            ExecutionState(**raw)
-            for raw in values
-            if raw.get("status") in {"running", "retrying"}
-            or (raw.get("status") == "pending" and raw.get("attempt", 0) > 0)
-        ]
+        return [ExecutionState(**raw) for raw in values if raw.get("status") in {"running", "retrying"} or (raw.get("status") == "pending" and raw.get("attempt", 0) > 0)]
