@@ -1,8 +1,9 @@
 import pytest
 
-from kernel.scheduler import Scheduler
 from runtime.agent_executor import AgentExecutor
 from runtime.execution_audit import ExecutionAudit
+from runtime.runtime_orchestrator import RuntimeOrchestrator
+from runtime.tool_executor import ToolExecutor
 from runtime.tool_registry import ToolRegistry
 from runtime.tool_sandbox import ToolSandbox
 from runtime.vnext_orchestrator import VNextOrchestrator
@@ -27,13 +28,9 @@ async def test_orchestrator_executes_plan_through_tool_boundary():
     registry.register("add", add, permissions={"compute"})
     audit = ExecutionAudit()
     sandbox = ToolSandbox(registry, audit, authorization={"agent-1": {"compute"}})
-    executor = AgentExecutor(sandbox)
-    orchestrator = VNextOrchestrator(
-        planner=Planner(),
-        scheduler=Scheduler(),
-        agent=Agent(),
-        executor=executor,
-    )
+    executor = AgentExecutor(ToolExecutor(sandbox))
+    runtime = RuntimeOrchestrator(executor=executor, planner=Planner())
+    orchestrator = VNextOrchestrator(runtime_orchestrator=runtime, agent=Agent())
 
     result = await orchestrator.run("calculate", "task-1", {"permissions": ["compute"]})
 
@@ -50,7 +47,7 @@ async def test_context_cannot_self_grant_unauthorized_permissions():
     registry = ToolRegistry()
     registry.register("add", add, permissions={"compute"})
     sandbox = ToolSandbox(registry, authorization={"agent-1": set()})
-    executor = AgentExecutor(sandbox)
+    executor = AgentExecutor(ToolExecutor(sandbox))
 
     result = await executor.execute(
         Agent(),
