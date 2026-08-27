@@ -41,7 +41,7 @@ class ExecutionCommitCoordinator:
             commit=ExecutionCommit(**{**asdict(commit),"sequence":self._next_sequence_unlocked()}).with_integrity()
             with self.journal_path.open("a",encoding="utf-8") as h:h.write(json.dumps(asdict(commit),ensure_ascii=False,default=str)+"\n");h.flush();os.fsync(h.fileno())
             return commit
-    def _read_journal(self):
+    def _read_journal_unlocked(self):
         if not self.journal_path.exists():return []
         result=[];expected=1
         for line in self.journal_path.read_text(encoding="utf-8").splitlines():
@@ -54,6 +54,9 @@ class ExecutionCommitCoordinator:
                 self._quarantine(line,str(exc));expected=max(expected+1,int(raw.get("sequence",0))+1) if isinstance(raw,dict) else expected+1;continue
             result.append(commit);expected=commit.sequence+1
         return result
+    def _read_journal(self):
+        with _JournalLock(self.lock_path):
+            return self._read_journal_unlocked()
     def _quarantine(self,line,reason):
         with self.quarantine_path.open("a",encoding="utf-8") as h:h.write(json.dumps({"reason":reason,"line":line,"quarantined_at":datetime.now(timezone.utc).isoformat()},ensure_ascii=False)+"\n")
     def _lease_valid_unlocked(self,execution_id):
@@ -77,7 +80,7 @@ class ExecutionCommitCoordinator:
         return commit
     def _mark(self,commit_id,status):
         with _JournalLock(self.lock_path):
-            commits=self._read_journal()
+            commits=self._read_journal_unlocked()
             for i,commit in enumerate(commits):
                 if commit.commit_id==commit_id:commits[i]=ExecutionCommit(**{**asdict(commit),"status":status}).with_integrity();break
             tmp=self.journal_path.with_suffix(self.journal_path.suffix+".tmp");tmp.write_text("".join(json.dumps(asdict(c.with_integrity()),ensure_ascii=False,default=str)+"\n" for c in commits),encoding="utf-8")
