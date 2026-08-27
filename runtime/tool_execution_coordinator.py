@@ -1,34 +1,20 @@
-"""Cross-layer commit coordinator for tool-backed executions.
+"""Coordinate durable tool commits with execution-state transitions."""
+from typing import Any
 
-The coordinator keeps the two durable protocols ordered: a terminal tool
-outcome is persisted first, then the execution lifecycle is committed. This
-makes a crash between the two phases recoverable without replaying the tool.
-"""
-from dataclasses import dataclass
-from typing import Any, Optional
-
-from .execution_boundary import BoundaryCommit, ExecutionBoundary
-from .execution_commit import ExecutionCommit, ExecutionCommitCoordinator
-from .execution_store import ExecutionState
-from .tool_idempotency_store import ToolIdempotencyStore
-from .tool_intent_store import ToolIntentStore
+from .execution_boundary import ExecutionBoundary, BoundaryCommit
+from .execution_state import ExecutionState
 
 
-@dataclass(frozen=True)
 class ToolExecutionCommit:
-    tool: BoundaryCommit
-    execution: Optional[ExecutionCommit]
+    def __init__(self, tool_commit: BoundaryCommit, execution_commit):
+        self.tool_commit = tool_commit
+        self.execution_commit = execution_commit
 
 
 class ToolExecutionCoordinator:
-    def __init__(
-        self,
-        intents: ToolIntentStore,
-        results: ToolIdempotencyStore,
-        executions: ExecutionCommitCoordinator,
-    ):
-        self.boundary = ExecutionBoundary(intents, results)
+    def __init__(self, executions, boundary: ExecutionBoundary):
         self.executions = executions
+        self.boundary = boundary
 
     def commit(
         self,
@@ -43,17 +29,20 @@ class ToolExecutionCoordinator:
         value: Any = None,
         error: str | None = None,
         execution_status: str | None = None,
+        arguments: dict[str, Any] | None = None,
     ) -> ToolExecutionCommit:
         """Durably commit a tool result, then its execution state.
 
         A failed/fenced execution-layer commit never causes the already durable
         tool outcome to be executed again. Callers can reconcile the execution
-        journal independently.
+        journal independently. ``arguments`` remains optional for compatibility
+        with older coordinator callers; newer callers should pass the tool args.
         """
         tool_commit = self.boundary.commit(
             key=key,
             call_id=call_id,
             tool=tool,
+            arguments=arguments,
             owner_id=owner_id,
             claim_token=claim_token,
             ok=ok,
