@@ -15,19 +15,22 @@ def test_concurrent_recovery_workers_commit_one_terminal_effect(tmp_path):
 
     calls = []
     calls_lock = threading.Lock()
-    barrier = threading.Barrier(2)
+    resolver_started = threading.Event()
 
     def resolver(item):
-        barrier.wait(timeout=5)
+        resolver_started.set()
         with calls_lock:
             calls.append(item.idempotency_key)
         return "completed", {"ok": True}
 
     results = []
+    results_lock = threading.Lock()
 
     def run(worker_id):
         worker = IntentRecoveryWorker(intents, leases, worker_id, journal)
-        results.append(worker.recover_one(intent, resolver))
+        result = worker.recover_one(intent, resolver)
+        with results_lock:
+            results.append(result)
 
     threads = [threading.Thread(target=run, args=("worker-a",)), threading.Thread(target=run, args=("worker-b",))]
     for thread in threads:
@@ -35,6 +38,7 @@ def test_concurrent_recovery_workers_commit_one_terminal_effect(tmp_path):
     for thread in threads:
         thread.join(timeout=10)
 
+    assert resolver_started.is_set()
     assert len(results) == 2
     assert sum(result.status == "completed" for result in results) == 1
     assert sum(result.status == "skipped_by_lease" for result in results) == 1
