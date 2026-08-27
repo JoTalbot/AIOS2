@@ -2,9 +2,9 @@
 
 ## Current phase
 - Phase: isolated new architecture hardening and integration
-- Branch: `batch/15-tool-boundary-integration`
-- Latest integrated commit on `main`: `a9e5b9161f6985a104b775ca0008f10261cc8378`
-- Active work commit: `a98236f72059bc6b6e195dabcf05cf048c97a397`
+- Branch: `batch/16-recovery-lease-fencing`
+- Latest integrated commit on `main`: `87bb83bf558931fe97fdae2040b4425c500e8273`
+- Active work commit: `6bb18b8358624d091540d57a685b38ab5b2a6520`
 - Active PR: pending creation
 
 ## Current architecture work
@@ -17,19 +17,19 @@
 - Lease rotation after a post-CAS crash fences the stale worker and prevents stale reconciliation from reapplying the intent.
 - Durable tool intents use owner/claim-token fencing for recovery and terminal transitions.
 
-## Batch 15 — Tool execution boundary integration
-- Corrected the ambiguous-result regression to reflect the store's `executing` claim state.
-- Routed terminal ToolExecutor persistence through the canonical `ToolExecutionBoundary` when both durable intent and idempotency stores are configured.
-- Claim loss after durable terminal-result persistence now propagates as an ambiguous result instead of falsely reporting a committed terminal intent.
-- Added regression coverage proving the durable result survives claim loss while the intent remains non-terminal for recovery.
+## Batch 16 — Recovery/Lease Fencing Hardening
+- Recovery lease scope now follows `execution_id` when present, falling back to the intent key for legacy intents.
+- Final lease ownership validation and terminal claim transition are performed under the lease coordination lock, closing the check-to-act fencing window.
+- Lease loss before terminal commit leaves the intent executing for safe recovery instead of allowing a stale worker to finalize it.
+- Added regression coverage for execution-scoped leases and deterministic lease rotation during reconciliation.
 
 ## Validation
-- Changes are committed on `batch/15-tool-boundary-integration`.
+- Changes are committed on `batch/16-recovery-lease-fencing`.
 - Target: `main`.
 - GitHub Actions is the authoritative full-suite validation path.
 
 ## Next actions
-1. Create PR for Batch 15 and wait for GitHub Actions validation.
+1. Create PR for Batch 16 and wait for GitHub Actions validation.
 2. Fix any CI failures only on the owning branch.
 3. Merge only after required CI is green, then update this status on `main`.
 
