@@ -49,9 +49,23 @@ class ExecutionCommitCoordinator:
         self.quarantine_path = Path(quarantine_path)
         self.journal_path.parent.mkdir(parents=True, exist_ok=True)
 
+    def _next_sequence(self):
+        if not self.journal_path.exists():
+            return 1
+        maximum = 0
+        lines = self.journal_path.read_text(encoding="utf-8").splitlines()
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                sequence = int(json.loads(line).get("sequence", 0))
+            except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
+                continue
+            maximum = max(maximum, sequence)
+        return maximum + 1 if maximum else len(lines) + 1
+
     def _append_journal(self, commit: ExecutionCommit):
-        commits = self._read_journal()
-        commit = ExecutionCommit(**{**asdict(commit), "sequence": len(commits) + 1}).with_integrity()
+        commit = ExecutionCommit(**{**asdict(commit), "sequence": self._next_sequence()}).with_integrity()
         with self.journal_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(asdict(commit), ensure_ascii=False, default=str) + "\n")
             handle.flush()
@@ -70,19 +84,24 @@ class ExecutionCommitCoordinator:
         for line in self.journal_path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
+            raw = {}
             try:
                 raw = json.loads(line)
+                sequence = int(raw.get("sequence", expected))
                 raw.setdefault("status", "pending")
-                raw.setdefault("sequence", expected)
+                raw.setdefault("sequence", sequence)
                 commit = ExecutionCommit(**raw)
                 if commit.sequence != expected or commit.with_integrity().checksum != commit.checksum:
                     raise CorruptJournalError(f"invalid journal integrity at sequence {expected}")
-            except (json.JSONDecodeError, TypeError, KeyError, CorruptJournalError) as exc:
+            except (json.JSONDecodeError, TypeError, KeyError, ValueError, CorruptJournalError) as exc:
                 self._quarantine(line, str(exc))
-                expected += 1
+                try:
+                    expected = max(expected + 1, int(raw.get("sequence", 0)) + 1)
+                except (AttributeError, TypeError, ValueError):
+                    expected += 1
                 continue
             result.append(commit)
-            expected += 1
+            expected = commit.sequence + 1
         return result
 
     def _quarantine(self, line: str, reason: str):
