@@ -1,8 +1,8 @@
 """Stable, non-sensitive recovery result contract."""
 from dataclasses import dataclass
 from typing import Literal
-RecoveryStatus = Literal["recovered", "skipped_by_lease", "failed"]
-_ALLOWED_STATUSES = frozenset(("recovered", "skipped_by_lease", "failed"))
+RecoveryStatus = Literal["recovered", "skipped_by_lease", "failed", "stale"]
+_ALLOWED_STATUSES = frozenset(("recovered", "skipped_by_lease", "failed", "stale"))
 @dataclass(frozen=True)
 class RecoveryOutcome:
     """Immutable recovery result with compatibility for the legacy tuple API."""

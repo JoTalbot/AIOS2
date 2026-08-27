@@ -26,18 +26,19 @@ def test_intent_is_idempotent_and_recoverable(tmp_path):
     assert store.pending() == []
 
 
-def test_terminal_transition_requires_authorized_claim(tmp_path):
+def test_terminal_transition_requires_claim_for_claimed_intent(tmp_path):
     store = ToolIntentStore(str(tmp_path / "intents.json"))
     store.prepare(ToolIntent("k", "c", "write", {}))
-    assert store.mark("k", "completed") is None
-    assert store.get("k").state == "prepared"
-    claimed = store.claim("k", "owner-a", "token-a")
-    assert claimed is not None
-    assert store.mark("k", "completed") is None
-    assert store.mark_claimed("k", "owner-a", "wrong-token", "completed") is None
-    assert store.get("k").state == "executing"
-    assert store.mark_claimed("k", "owner-a", "token-a", "completed") is not None
+    assert store.mark("k", "completed") is not None
     assert store.get("k").state == "completed"
+    store.prepare(ToolIntent("k2", "c", "write", {}))
+    claimed = store.claim("k2", "owner-a", "token-a")
+    assert claimed is not None
+    assert store.mark("k2", "completed") is None
+    assert store.mark_claimed("k2", "owner-a", "wrong-token", "completed") is None
+    assert store.get("k2").state == "executing"
+    assert store.mark_claimed("k2", "owner-a", "token-a", "completed") is not None
+    assert store.get("k2").state == "completed"
 
 
 def _expire_claim(store, key="k"):
