@@ -1,18 +1,24 @@
 # AIOS New Architecture — Shared Agent Status
 
 ## Current phase
-- Phase: canonical execution consolidation
+- Phase: project-definition and new-architecture plan migration, then canonical execution consolidation
 - Branch: `canonical-execution`
-- Source architecture line: `main` (new vNext architecture)
+- Source architecture line: `JoTalbot/AIOS:new`
 
 ## Active agents
 
 | Agent | Task | Branch | Status |
 |---|---|---|---|
-| current | canonical execution/recovery/persistence consolidation | `canonical-execution` | in progress |
+| current | project definition / plan migration and canonical execution consolidation | `canonical-execution` | in progress |
 
 ## Completed
 - Established dedicated new-architecture repository line.
+- Restored the original AIOS project positioning and purpose in `README.md` and `PROJECT.md`.
+- Preserved the original AIOS v1 architecture description in `docs/AIOS_V1.md`.
+- Ported the vNext architecture contract to `docs/ARCHITECTURE.md`.
+- Preserved the development plan used by `JoTalbot/AIOS:new` in `docs/NEW_ARCHITECTURE_PLAN.md`.
+- Aligned `AGENTS.md` with the AIOS2 canonical-execution branch.
+- Verified shared agent protocol, status, memory, architect role and reusable skills are present in AIOS2.
 - Mapped execution lifecycle, persistence, journal, audit, lease and recovery boundaries.
 - Added the canonical execution invariants contract in `docs/EXECUTION_INVARIANTS.md`.
 - Routed autonomous-loop lifecycle checkpoints through `ExecutionCommitCoordinator`.
@@ -25,7 +31,8 @@
 - Enforced that persistent `AutonomousExecutionLoop` instances receive an explicit checkpoint/commit boundary.
 - Exposed canonical `execution_id` on `LoopResult` for control-plane correlation.
 - Replaced the duplicate scheduler-based `VNextOrchestrator` execution world with a facade over `RuntimeOrchestrator`.
-- Updated loop transition coverage to construct the canonical persistence path explicitly.
+- Added crash-consistency and persistence-boundary documentation/tests.
+- Added lease fencing generation support and stale-owner checks.
 
 ## Current architecture work
 - One durable execution authority: `RuntimeOrchestrator` → `AutonomousExecutionLoop`.
@@ -37,12 +44,13 @@
 - Journal integrity is enforced on every record rewrite, including lifecycle status changes.
 
 ## Next actions
-1. Run the complete test suite and targeted recovery/concurrency tests in CI.
-2. Audit all remaining direct lifecycle mutations (`ExecutionStore.save/transition`) and classify setup-only persistence versus runtime mutation.
-3. Add crash-window tests for journal/store/audit ordering.
-4. Add integration tests for stale lease ownership and recovery takeover.
-5. Evaluate a distributed persistence/lease adapter for multi-machine production use.
-6. Record architectural decisions and handoffs here or in docs/ADR.
+1. Finish fencing-token propagation into the persistence mutation boundary.
+2. Run the complete test suite and targeted recovery/concurrency tests in CI.
+3. Audit all remaining direct lifecycle mutations (`ExecutionStore.save/transition`) and classify setup-only persistence versus runtime mutation.
+4. Add crash-window tests for journal/store/audit ordering.
+5. Add integration tests for stale lease ownership and recovery takeover.
+6. Evaluate a distributed persistence/lease adapter for multi-machine production use.
+7. Record architectural decisions and handoffs here or in docs/ADR.
 
 ## Rules
 Every agent updates this file before and after significant work. GitHub is the source of truth; do not rely on local chat history.
