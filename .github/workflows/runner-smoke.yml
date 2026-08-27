@@ -2,50 +2,73 @@ name: runner-smoke
 
 on:
   workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
+
+concurrency:
+  group: runner-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: '1'
 
 jobs:
   probe:
     name: runner allocation probe
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
-      - name: Runner identity
+      - name: Heartbeat / allocation start
         shell: bash
         run: |
           set -euxo pipefail
-          echo "runner=${RUNNER_NAME}"
-          echo "os=${RUNNER_OS}"
-          echo "arch=${RUNNER_ARCH}"
-          echo "workspace=${GITHUB_WORKSPACE}"
-          uname -a
-          python3 --version
+          mkdir -p runner-diagnostics
+          {
+            echo "event=${GITHUB_EVENT_NAME}"
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "run_attempt=${GITHUB_RUN_ATTEMPT}"
+            echo "workflow=${GITHUB_WORKFLOW}"
+            echo "ref=${GITHUB_REF}"
+            echo "sha=${GITHUB_SHA}"
+            echo "runner=${RUNNER_NAME}"
+            echo "os=${RUNNER_OS}"
+            echo "arch=${RUNNER_ARCH}"
+            echo "runner_temp=${RUNNER_TEMP}"
+            echo "workspace=${GITHUB_WORKSPACE}"
+            echo "heartbeat_start=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } | tee runner-diagnostics/heartbeat-start.txt
+          uname -a | tee runner-diagnostics/uname.txt
+          python3 --version | tee runner-diagnostics/python-version.txt
       - name: Minimal execution probe
         shell: bash
         run: |
           set -euxo pipefail
-          test -n "${RUNNER_NAME}"
-          test "${RUNNER_OS}" = "Linux"
-          python3 - <<'PY'
-          import os
-          print("runner probe ok")
+          python3 - <<'PY' | tee runner-diagnostics/probe.txt
+          import os, platform, time
+          print("probe=ok")
           print("pid=", os.getpid())
           print("cwd=", os.getcwd())
+          print("platform=", platform.platform())
+          print("heartbeat_probe=", time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))
           PY
-      - name: Upload runner probe
+      - name: Heartbeat / allocation end
         if: always()
         shell: bash
         run: |
           {
-            echo "runner=${RUNNER_NAME:-unknown}"
-            echo "os=${RUNNER_OS:-unknown}"
-            echo "arch=${RUNNER_ARCH:-unknown}"
-            date -u
-          } > runner-smoke.txt
-      - uses: actions/upload-artifact@v4
+            echo "heartbeat_end=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "job_status=completed-step"
+          } | tee runner-diagnostics/heartbeat-end.txt
+          ps -ef --forest > runner-diagnostics/process-tree.txt || true
+          df -h > runner-diagnostics/disk.txt || true
+          free -h > runner-diagnostics/memory.txt || true
+      - name: Upload runner diagnostics
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: runner-smoke
-          path: runner-smoke.txt
+          name: runner-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: runner-diagnostics/
+          if-no-files-found: warn
