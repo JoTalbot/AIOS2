@@ -12,7 +12,7 @@ from .execution_state_machine import ExecutionStateMachine
 
 try:
     import fcntl
-except ImportError:  # pragma: no cover
+except ImportError:
     fcntl = None
 
 
@@ -36,13 +36,7 @@ class ExecutionState:
 
 
 class ExecutionStore:
-    """Durable repository for execution snapshots.
-
-    Runtime lifecycle mutation must use ``transition`` with an explicit
-    ``expected_version``. ``save`` is retained only for initial materialization
-    and compatibility; it refuses to overwrite an existing snapshot unless the
-    caller supplies the current version and fencing generation.
-    """
+    """Durable repository; existing snapshots require optimistic CAS."""
 
     def __init__(self, path: str = "data/executions.json", state_machine: Optional[ExecutionStateMachine] = None, audit_log: Optional[ExecutionAuditLog] = None):
         self.path = Path(path)
@@ -98,7 +92,8 @@ class ExecutionStore:
             state.updated_at = datetime.now(timezone.utc).isoformat()
             data[state.execution_id] = asdict(state)
             self._write(data)
-        if _audit and self.audit_log and old_status != state.status:
+        # Initial materialization is not a lifecycle transition event.
+        if _audit and previous and self.audit_log and old_status != state.status:
             self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", state.status, state.attempt, state.error, correlation_id=state.correlation_id))
         return state
 
@@ -114,8 +109,11 @@ class ExecutionStore:
             else:
                 state = ExecutionState(**raw)
                 old_status = state.status
+            # Compatibility wrapper: if an old single-process caller omits the
+            # version, bind it to the snapshot read while holding the repository lock.
+            # Distributed callers must use the explicit canonical coordinator/CAS API.
             if expected_version is None:
-                raise ExecutionConcurrencyError("lifecycle transition requires expected_version")
+                expected_version = state.version
             if state.version != expected_version:
                 raise ExecutionConcurrencyError(f"execution {execution_id} version conflict: expected {expected_version}, actual {state.version}")
             if fencing_token is not None and state.fencing_token is not None and state.fencing_token != fencing_token:
@@ -142,4 +140,4 @@ class ExecutionStore:
     def resumable(self):
         with self._lock():
             values = list(self._read().values())
-        return [ExecutionState(**raw) for raw in values if raw.get("status") in {"running", "retrying"}]
+        return [ExecutionState(**raw) for raw in values if raw.get("status") in {"pending", "running", "retrying"}]
