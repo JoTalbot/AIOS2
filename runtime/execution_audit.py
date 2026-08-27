@@ -45,4 +45,11 @@ class ExecutionAuditLog:
                 if fcntl is not None: fcntl.flock(lock.fileno(),fcntl.LOCK_UN)
     def events(self,execution_id=None):
         if not self.path.exists(): return []
-        return [ExecutionAuditEvent(**json.loads(line)) for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip() and (execution_id is None or json.loads(line).get("execution_id")==execution_id)]
+        self.lock_path.touch(exist_ok=True)
+        with self.lock_path.open("r+",encoding="utf-8") as lock:
+            if fcntl is not None: fcntl.flock(lock.fileno(),fcntl.LOCK_SH)
+            try:
+                lines=self.path.read_text(encoding="utf-8").splitlines()
+                return [ExecutionAuditEvent(**json.loads(line)) for line in lines if line.strip() and (execution_id is None or json.loads(line).get("execution_id")==execution_id)]
+            finally:
+                if fcntl is not None: fcntl.flock(lock.fileno(),fcntl.LOCK_UN)
