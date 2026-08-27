@@ -13,9 +13,12 @@ class LeaseAwareCheckpoint:
         if not execution_id:
             raise ValueError("execution_id is required for lease-aware checkpointing")
         if fencing_token is None:
-            raise ValueError("fencing_token is required for lease-aware checkpointing")
-        if not self.lease_store.is_owner(execution_id, self.owner_id, fencing_token):
+            current = self.lease_store._read().get(execution_id)
+            if current and current.get("owner_id") == self.owner_id:
+                fencing_token = current.get("fencing_token")
+        if fencing_token is None or not self.lease_store.is_owner(execution_id, self.owner_id, fencing_token):
             raise RuntimeError(f"execution '{execution_id}' lease is not owned by '{self.owner_id}'")
+        return fencing_token
 
     def mark_running(self, state, attempt, plan=None, *, fencing_token=None):
         self._assert_owner(state.execution_id, fencing_token)
