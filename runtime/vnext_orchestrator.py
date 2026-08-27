@@ -22,14 +22,35 @@ class VNextOrchestrator:
     RuntimeOrchestrator owns execution lifecycle, persistence, leases, recovery,
     and tool execution. This class is deliberately a facade and must not create
     a second scheduler/execution world.
+
+    ``planner/scheduler/executor`` keyword arguments are retained as a migration
+    shim for older callers. The scheduler is intentionally ignored; execution is
+    always delegated to a single ``RuntimeOrchestrator`` instance.
     """
 
-    def __init__(self, runtime_orchestrator, agent, reflection=None, memory=None, event_bus=None):
+    def __init__(
+        self,
+        runtime_orchestrator=None,
+        agent=None,
+        reflection=None,
+        memory=None,
+        event_bus=None,
+        *,
+        planner=None,
+        scheduler=None,
+        executor=None,
+    ):
+        if runtime_orchestrator is None:
+            if executor is None or planner is None:
+                raise TypeError("runtime_orchestrator or both planner and executor are required")
+            from .runtime_orchestrator import RuntimeOrchestrator
+            runtime_orchestrator = RuntimeOrchestrator(executor=executor, planner=planner, event_bus=event_bus)
         self.runtime = runtime_orchestrator
         self.agent = agent
         self.reflection = reflection
         self.memory = memory
         self.events = OrchestrationEvents(event_bus)
+        self.scheduler = scheduler  # migration metadata only; never used for execution
 
     async def run(self, goal: str, task_id: str, metadata: Optional[Dict[str, Any]] = None):
         context = dict(metadata or {})
