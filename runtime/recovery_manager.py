@@ -2,7 +2,6 @@
 
 from typing import Any, Optional
 
-from .execution_audit import ExecutionAuditLog
 from .execution_commit import ExecutionCommitCoordinator
 from .execution_store import ExecutionStore
 
@@ -10,7 +9,9 @@ from .execution_store import ExecutionStore
 class RecoveryManager:
     def __init__(self, store: ExecutionStore, commit_coordinator=None):
         self.store = store
-        self.commit_coordinator = commit_coordinator or ExecutionCommitCoordinator(store, ExecutionAuditLog())
+        self.commit_coordinator = commit_coordinator
+        if self.commit_coordinator is None:
+            raise RuntimeError("canonical commit coordinator is required")
 
     def pending(self):
         return self.store.resumable()
