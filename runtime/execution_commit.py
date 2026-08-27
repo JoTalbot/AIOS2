@@ -55,10 +55,11 @@ class ExecutionCommitCoordinator:
             result.append(commit);expected=commit.sequence+1
         return result
     def _read_journal(self):
-        with _JournalLock(self.lock_path):
-            return self._read_journal_unlocked()
+        with _JournalLock(self.lock_path):return self._read_journal_unlocked()
     def _quarantine(self,line,reason):
-        with self.quarantine_path.open("a",encoding="utf-8") as h:h.write(json.dumps({"reason":reason,"line":line,"quarantined_at":datetime.now(timezone.utc).isoformat()},ensure_ascii=False)+"\n")
+        self.quarantine_path.parent.mkdir(parents=True,exist_ok=True)
+        with self.quarantine_path.open("a",encoding="utf-8") as h:
+            h.write(json.dumps({"reason":reason,"line":line,"quarantined_at":datetime.now(timezone.utc).isoformat()},ensure_ascii=False)+"\n");h.flush();os.fsync(h.fileno())
     def _lease_valid_unlocked(self,execution_id):
         if self.lease_store is None:return True
         if not self.lease_owner_id or self.fencing_token is None:return False
@@ -86,6 +87,10 @@ class ExecutionCommitCoordinator:
             tmp=self.journal_path.with_suffix(self.journal_path.suffix+".tmp");tmp.write_text("".join(json.dumps(asdict(c.with_integrity()),ensure_ascii=False,default=str)+"\n" for c in commits),encoding="utf-8")
             with tmp.open("r+",encoding="utf-8") as h:h.flush();os.fsync(h.fileno())
             tmp.replace(self.journal_path)
+            if hasattr(os,"O_DIRECTORY"):
+                try:
+                    fd=os.open(str(self.journal_path.parent),os.O_RDONLY|os.O_DIRECTORY);os.fsync(fd);os.close(fd)
+                except OSError:pass
     def reconcile(self):
         repaired=[]
         for commit in self.pending():
