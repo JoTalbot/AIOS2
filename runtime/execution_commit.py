@@ -91,10 +91,7 @@ class ExecutionCommitCoordinator:
         return commit
 
     def _append_journal(self, commit: ExecutionCommit):
-        """Compatibility entry point for recovery/fault-injection tooling.
-
-        It only appends a durable intent; it does not mutate execution state.
-        """
+        """Append a durable intent without mutating execution state."""
         with self._lock():
             return self._append_journal_unlocked(commit)
 
@@ -131,14 +128,21 @@ class ExecutionCommitCoordinator:
         with self.quarantine_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"reason": reason, "line": line, "quarantined_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False) + "\n")
 
-    def commit(self, state: ExecutionState, to_status: str, *, checkpoint=None, reason=None, updates=None, fencing_token: Optional[int] = None):
-        current = self.store.get(state.execution_id) or state
+    def commit(self, state: ExecutionState | str, to_status: str, *, checkpoint=None, reason=None, updates=None, fencing_token: Optional[int] = None, correlation_id: Optional[str] = None):
+        execution_id = state if isinstance(state, str) else state.execution_id
+        current = self.store.get(execution_id)
+        if current is None:
+            if isinstance(state, str):
+                current = self.store.create(execution_id)
+            else:
+                current = self.store.create(execution_id, metadata={"goal": state.goal, "attempt": state.attempt, "plan": state.plan, "correlation_id": state.correlation_id, "fencing_token": state.fencing_token})
         updates = dict(updates or {})
         if to_status == "completed" and checkpoint is not None:
             updates.setdefault("result", checkpoint)
         if to_status == "failed" and reason is not None:
             updates.setdefault("error", reason)
         effective_fence = fencing_token if fencing_token is not None else current.fencing_token
+        effective_correlation = correlation_id if correlation_id is not None else current.correlation_id
         with self._lock():
             commits = self._read_journal_unlocked()
             if current.status == to_status and current.version > 0:
@@ -146,13 +150,13 @@ class ExecutionCommitCoordinator:
                     if existing.execution_id == current.execution_id and existing.to_status == to_status and existing.expected_version == current.version - 1 and existing.fencing_token == effective_fence:
                         return existing
             expected_version = current.version
-            commit_id = f"{current.execution_id}:{current.attempt}:{current.status}:{to_status}:{expected_version}:{effective_fence}:{current.correlation_id or ''}"
+            commit_id = f"{current.execution_id}:{current.attempt}:{current.status}:{to_status}:{expected_version}:{effective_fence}:{effective_correlation or ''}"
             for existing in commits:
                 if existing.commit_id == commit_id:
                     return existing
-            commit = self._append_journal_unlocked(ExecutionCommit(commit_id, current.execution_id, current.status, to_status, current.attempt, checkpoint, reason, correlation_id=current.correlation_id, expected_version=expected_version, fencing_token=effective_fence))
+            commit = self._append_journal_unlocked(ExecutionCommit(commit_id, current.execution_id, current.status, to_status, current.attempt, checkpoint, reason, correlation_id=effective_correlation, expected_version=expected_version, fencing_token=effective_fence))
             updated = self.store.transition(current.execution_id, to_status, _audit=False, expected_version=expected_version, fencing_token=effective_fence, **updates)
-            self.audit_log.append(ExecutionAuditEvent(current.execution_id, current.status, to_status, current.attempt, reason, correlation_id=current.correlation_id, event_id=commit_id, version=updated.version))
+            self.audit_log.append(ExecutionAuditEvent(current.execution_id, current.status, to_status, current.attempt, reason, correlation_id=effective_correlation, event_id=commit_id, version=updated.version))
             self._mark_unlocked(commit_id, "applied")
             return commit
 
