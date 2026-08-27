@@ -54,6 +54,10 @@ class ToolExecutor:
                 claimed_intent = True
             try:
                 result = await self._execute_once(call, context, execution_context)
+                if isinstance(result.error, asyncio.TimeoutError):
+                    if claimed_intent and self.intent_store: self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
+                    self._idempotent_results[key] = result
+                    return result
                 if result.retryable:
                     if claimed_intent and self.intent_store: self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
                     self._idempotent_results[key] = result
