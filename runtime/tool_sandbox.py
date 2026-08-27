@@ -1,6 +1,6 @@
 """Policy-aware execution boundary for AIOS tools."""
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 from .execution_audit import ExecutionAudit
 from .tool_registry import ToolRegistry
 
@@ -10,8 +10,8 @@ class ToolExecutionContext:
     permissions: frozenset[str] = frozenset()
 
 class ToolSandbox:
-    def __init__(self, registry, audit=None, authorization=None):
-        self.registry = registry
+    def __init__(self, registry=None, audit=None, authorization=None):
+        self.registry = registry or ToolRegistry()
         self.audit = audit or ExecutionAudit()
         self.authorization = {str(a): frozenset(p) for a, p in (authorization or {}).items()}
 
