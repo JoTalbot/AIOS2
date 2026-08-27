@@ -1,5 +1,6 @@
 from runtime.execution_lease import ExecutionLeaseStore
 from runtime.intent_recovery_worker import IntentRecoveryWorker
+from runtime.reconciliation_journal import ReconciliationJournal
 from runtime.tool_intent_store import ToolIntent, ToolIntentStore
 
 
@@ -55,3 +56,35 @@ def test_recovery_fencing_loss_does_not_commit_claim(tmp_path):
     result = worker.recover_one(intent, resolver)
     assert result.status == "skipped_by_lease"
     assert intents.get("k").state == "ambiguous"
+
+
+def test_terminal_journal_replays_over_stale_claim_after_crash(tmp_path, monkeypatch):
+    intents = ToolIntentStore(str(tmp_path / "intents.json"))
+    leases = ExecutionLeaseStore(str(tmp_path / "leases.json"))
+    journal = ReconciliationJournal(str(tmp_path / "journal.json"))
+    intent = ToolIntent("crash", "call", "send", {}, "execution-crash", "ambiguous")
+    intents.prepare(intent)
+
+    original_mark = intents.mark_claimed
+    def crash_after_journal(*args, **kwargs):
+        raise RuntimeError("simulated crash after journal commit")
+    monkeypatch.setattr(intents, "mark_claimed", crash_after_journal)
+
+    worker_a = IntentRecoveryWorker(intents, leases, "worker-a", journal)
+    try:
+        worker_a.recover_one(intent, lambda item: ("completed", {"ok": True}))
+    except RuntimeError:
+        pass
+
+    assert journal.get("crash").status == "completed"
+    assert intents.get("crash").state == "executing"
+
+    monkeypatch.setattr(intents, "mark_claimed", original_mark)
+    calls = []
+    worker_b = IntentRecoveryWorker(intents, leases, "worker-b", journal)
+    result = worker_b.recover_one(intent, lambda item: calls.append(item) or ("failed", None))
+
+    assert result.status == "completed"
+    assert result.reason == "journal_replay"
+    assert calls == []
+    assert intents.get("crash").state == "completed"
