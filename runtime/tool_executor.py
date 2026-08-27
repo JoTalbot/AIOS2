@@ -5,6 +5,8 @@ import uuid
 from typing import Dict
 
 from .event_bus import EventBus
+from .execution_boundary import ExecutionBoundary
+from .execution_boundary_adapter import ToolExecutionBoundary
 from .execution_context import ExecutionContext
 from .execution_events import ExecutionEvent
 from .event_types import TOOL_COMPLETED, TOOL_FAILED, TOOL_STARTED
@@ -21,6 +23,10 @@ class ToolExecutor:
         self.idempotency_store, self.intent_store = idempotency_store, intent_store
         self._idempotent_results: Dict[str, ToolResult] = {}
         self._idempotent_locks: Dict[str, asyncio.Lock] = {}
+        self.execution_boundary = (
+            ToolExecutionBoundary(ExecutionBoundary(intent_store, idempotency_store))
+            if intent_store and idempotency_store else None
+        )
 
     async def execute(self, call: ToolCall, context: ToolExecutionContext, execution_context: ExecutionContext | None = None) -> ToolResult:
         if not isinstance(call, ToolCall): raise ToolBoundaryError("typed ToolCall is required")
@@ -62,11 +68,14 @@ class ToolExecutor:
                     if claimed_intent and self.intent_store: self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
                     self._idempotent_results[key] = result
                     return result
-                if self.idempotency_store:
-                    stored = self.idempotency_store.put_if_absent(StoredToolResult(key, call.call_id, call.tool, result.ok, result.value if result.ok else None, result.error))
-                    result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
-                if claimed_intent and self.intent_store:
-                    self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed" if result.ok else "failed")
+                if self.execution_boundary and claimed_intent:
+                    result = self.execution_boundary.commit(call, result, claim_owner, claim_token)
+                else:
+                    if self.idempotency_store:
+                        stored = self.idempotency_store.put_if_absent(StoredToolResult(key, call.call_id, call.tool, result.ok, result.value if result.ok else None, result.error))
+                        result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
+                    if claimed_intent and self.intent_store:
+                        self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed" if result.ok else "failed")
                 self._idempotent_results[key] = result
                 return result
             except asyncio.CancelledError:
