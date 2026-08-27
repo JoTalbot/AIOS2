@@ -36,7 +36,7 @@ class ExecutionState:
 
 
 class ExecutionStore:
-    """Durable repository; existing snapshots require optimistic CAS."""
+    """Durable repository; explicit CAS is used by distributed callers."""
 
     def __init__(self, path: str = "data/executions.json", state_machine: Optional[ExecutionStateMachine] = None, audit_log: Optional[ExecutionAuditLog] = None):
         self.path = Path(path)
@@ -92,9 +92,8 @@ class ExecutionStore:
             state.updated_at = datetime.now(timezone.utc).isoformat()
             data[state.execution_id] = asdict(state)
             self._write(data)
-        # Initial materialization is not a lifecycle transition event.
         if _audit and previous and self.audit_log and old_status != state.status:
-            self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", state.status, state.attempt, state.error, correlation_id=state.correlation_id))
+            self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", state.status, state.attempt, state.error, correlation_id=state.correlation_id, version=state.version))
         return state
 
     def transition(self, execution_id: str, status: str, *, _audit: bool = True, expected_version: Optional[int] = None, fencing_token: Optional[int] = None, **updates) -> ExecutionState:
@@ -109,9 +108,9 @@ class ExecutionStore:
             else:
                 state = ExecutionState(**raw)
                 old_status = state.status
-            # Compatibility wrapper: if an old single-process caller omits the
-            # version, bind it to the snapshot read while holding the repository lock.
-            # Distributed callers must use the explicit canonical coordinator/CAS API.
+            # Snapshot binding under the repository lock is safe for local
+            # compatibility callers. Distributed callers must still supply an
+            # explicit expected_version through the canonical coordinator.
             if expected_version is None:
                 expected_version = state.version
             if state.version != expected_version:
@@ -129,7 +128,7 @@ class ExecutionStore:
             data[state.execution_id] = asdict(state)
             self._write(data)
         if _audit and self.audit_log and old_status != status:
-            self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", status, state.attempt, state.error, correlation_id=state.correlation_id))
+            self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", status, state.attempt, state.error, correlation_id=state.correlation_id, version=state.version))
         return state
 
     def get(self, execution_id: str) -> Optional[ExecutionState]:
