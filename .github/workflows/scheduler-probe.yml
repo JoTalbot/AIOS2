@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
   actions: read
+  contents: read
 
 jobs:
   probe:
@@ -15,22 +15,52 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Record allocation heartbeat
+      - name: Record allocation heartbeat and external run metadata
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
           mkdir -p scheduler-diagnostics
-          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          run_json=$(curl --fail-with-body --silent --show-error \
+          curl --fail-with-body --silent --show-error \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            "${api}")
-          created_at=$(printf '%s' "${run_json}" | jq -r '.created_at // empty')
-          run_started_at=$(printf '%s' "${run_json}" | jq -r '.run_started_at // empty')
+            "$api" > scheduler-diagnostics/run-metadata.json
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+
+          path = "scheduler-diagnostics/run-metadata.json"
+          data = json.load(open(path, encoding="utf-8"))
+
+          def parse(value):
+              if not value:
+                  return None
+              return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+          created = parse(data.get("created_at"))
+          started = parse(data.get("run_started_at"))
+          observed = datetime.now(timezone.utc)
+          print(f"workflow_created_at={data.get('created_at')}")
+          print(f"run_started_at={data.get('run_started_at')}")
+          print(f"status={data.get('status')}")
+          print(f"conclusion={data.get('conclusion')}")
+          print(f"run_id={data.get('id')}")
+          print(f"runner_name={os.environ.get('RUNNER_NAME')}")
+          print(f"allocation_observed_at={observed.isoformat().replace('+00:00', 'Z')}")
+          if created and started:
+              print(f"workflow_created_to_run_started_seconds={(started-created).total_seconds():.3f}")
+          else:
+              print("workflow_created_to_run_started_seconds=unavailable")
+          if started:
+              print(f"run_started_to_observed_seconds={(observed-started).total_seconds():.3f}")
+          else:
+              print("run_started_to_observed_seconds=unavailable")
+          PY
           {
             echo "event=${GITHUB_EVENT_NAME}"
             echo "run_id=${GITHUB_RUN_ID}"
@@ -41,28 +71,20 @@ jobs:
             echo "runner=${RUNNER_NAME}"
             echo "os=${RUNNER_OS}"
             echo "arch=${RUNNER_ARCH}"
-            echo "workflow_created_at=${created_at}"
-            echo "run_started_at=${run_started_at}"
-            echo "allocation_observed_at=${now}"
+            echo "allocation_heartbeat=${now}"
           } | tee scheduler-diagnostics/heartbeat.txt
-          printf '%s\n' "${run_json}" > scheduler-diagnostics/run.json
           uname -a | tee scheduler-diagnostics/uname.txt
           printf 'probe=ok\n' | tee scheduler-diagnostics/probe.txt
-          python3 - <<'PY' "${created_at}" "${run_started_at}" "${now}" | tee scheduler-diagnostics/latency.txt
-          import datetime as dt
-          import sys
-
-          def parse(value):
-              return dt.datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
-
-          created, started, observed = map(parse, sys.argv[1:])
-          print(f"workflow_created_at={created.isoformat() if created else 'unknown'}")
-          print(f"run_started_at={started.isoformat() if started else 'unknown'}")
-          print(f"allocation_observed_at={observed.isoformat()}")
-          if created and started:
-              print(f"run_creation_to_started_seconds={(started-created).total_seconds():.3f}")
-          if started:
-              print(f"started_to_observed_seconds={(observed-started).total_seconds():.3f}")
+          python3 - <<'PY' | tee scheduler-diagnostics/latency.txt
+          import json
+          from datetime import datetime, timezone
+          d=json.load(open('scheduler-diagnostics/run-metadata.json', encoding='utf-8'))
+          parse=lambda x: datetime.fromisoformat(x.replace('Z','+00:00')) if x else None
+          c=parse(d.get('created_at')); s=parse(d.get('run_started_at'))
+          print('created_at=', d.get('created_at'))
+          print('run_started_at=', d.get('run_started_at'))
+          print('observed_at=', datetime.now(timezone.utc).isoformat().replace('+00:00','Z'))
+          print('queue_upper_bound_seconds=', f'{(s-c).total_seconds():.3f}' if c and s else 'unavailable')
           PY
       - name: Upload scheduler diagnostics
         if: always()
