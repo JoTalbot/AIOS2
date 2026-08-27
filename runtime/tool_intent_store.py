@@ -1,6 +1,6 @@
 """Durable intent ledger for side-effecting tool calls."""
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 from typing import Any, Optional
@@ -23,6 +23,7 @@ class ToolIntent:
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     owner_id: Optional[str] = None
     claim_token: Optional[str] = None
+    claim_expires_at: Optional[str] = None
 
 class _IntentLock:
     def __init__(self, path: Path): self.path, self.handle = path, None
@@ -35,9 +36,10 @@ class _IntentLock:
         self.handle.close()
 
 class ToolIntentStore:
-    def __init__(self, path: str = "data/tool_intents.json"):
+    def __init__(self, path: str = "data/tool_intents.json", claim_ttl_seconds: int = 60):
         self.path = Path(path); self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        self.claim_ttl_seconds = max(1, claim_ttl_seconds)
     def _read(self):
         if not self.path.exists(): return {}
         data = json.loads(self.path.read_text(encoding="utf-8"))
@@ -55,18 +57,21 @@ class ToolIntentStore:
             data[intent.idempotency_key]=asdict(intent); self._write(data); return intent
     def claim(self, key: str, owner_id: str, claim_token: str):
         if not key or not owner_id or not claim_token: raise ValueError("key, owner_id and claim_token are required")
+        now=datetime.now(timezone.utc)
         with _IntentLock(self.lock_path):
             data=self._read(); raw=data.get(key)
             if raw is None or raw.get("state") not in AMBIGUOUS_STATES: return None
-            if raw.get("owner_id") not in (None, owner_id) or raw.get("claim_token") not in (None, claim_token): return None
-            raw["owner_id"], raw["claim_token"], raw["state"] = owner_id, claim_token, "executing"
+            expiry=raw.get("claim_expires_at")
+            if raw.get("owner_id") not in (None, owner_id) and expiry and datetime.fromisoformat(expiry) > now: return None
+            if raw.get("owner_id") == owner_id and raw.get("claim_token") not in (None, claim_token): return None
+            raw["owner_id"], raw["claim_token"], raw["claim_expires_at"], raw["state"] = owner_id, claim_token, (now+timedelta(seconds=self.claim_ttl_seconds)).isoformat(), "executing"
             self._write(data); return ToolIntent(**raw)
     def release_claim(self, key: str, owner_id: str, claim_token: str, state="ambiguous"):
         if state not in AMBIGUOUS_STATES: raise ValueError("release state must be ambiguous")
         with _IntentLock(self.lock_path):
             data=self._read(); raw=data.get(key)
             if raw is None or raw.get("owner_id") != owner_id or raw.get("claim_token") != claim_token: return False
-            raw["owner_id"], raw["claim_token"], raw["state"] = None, None, state
+            raw["owner_id"], raw["claim_token"], raw["claim_expires_at"], raw["state"] = None, None, None, state
             self._write(data); return True
     def mark(self, key, state):
         if state not in VALID_STATES: raise ValueError("invalid intent state")
