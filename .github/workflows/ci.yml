@@ -8,7 +8,7 @@ on:
 
 jobs:
   runner-check:
-    runs-on: runnerhut-linux-2vcpu-d03d2827
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Runner diagnostics
@@ -21,7 +21,7 @@ jobs:
 
   tests:
     needs: runner-check
-    runs-on: runnerhut-linux-2vcpu-d03d2827
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +33,7 @@ jobs:
 
   security:
     needs: runner-check
-    runs-on: runnerhut-linux-2vcpu-d03d2827
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       AIOS_OPERATOR_TOKEN: ci-test-token-16
