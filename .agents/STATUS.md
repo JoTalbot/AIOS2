@@ -37,15 +37,17 @@
 - Added regression coverage for empty execution IDs, unsupported statuses and stable serialization.
 - Added a repository-wide pytest GitHub Actions workflow (`.github/workflows/tests.yml`).
 - Fixed typed `ToolCall` argument forwarding in the registry execution boundary and added regression coverage.
+- Hardened bootstrap recovery so stale/fenced workers cannot persist failure or claim successful recovery after losing the lease.
+- Added regression coverage for stale recovery-worker fencing.
 
 ## Validation
 - Security workflow for main commit `19defd0e810afc4c2568de46f82928f6937f1d38` is passing.
-- Repository-wide pytest workflow for that commit is currently failing: 17 failed, 87 passed.
-- The failures are a mixture of stale pre-hardening expectations and remaining compatibility/integration defects; they are now the primary baseline for batch remediation.
-- Active branch contains the first execution-boundary compatibility fix and its regression test.
+- Repository-wide pytest workflow for that commit was failing: 17 failed, 87 passed.
+- Active branch contains the execution-boundary compatibility fix plus stale-worker recovery fencing hardening and regression coverage.
+- A new GitHub Actions run has not yet been observed for the active branch after the latest commits.
 
 ## Next actions
-1. Push the active branch and run its full pytest workflow.
+1. Run the active branch through the full pytest workflow and inspect the resulting failures.
 2. Remediate remaining genuine integration defects without weakening lease, permission, CAS, or recovery fencing guarantees.
 3. Update stale tests to the stabilized recovery outcome and lease-aware contracts where the API intentionally changed.
 4. Continue with atomic execution version + fencing CAS and crash-consistency fault injection.
