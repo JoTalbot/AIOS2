@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta, timezone
+import json
+
 from runtime.execution_lease import ExecutionLeaseStore
 
 
@@ -14,8 +17,12 @@ def test_only_one_owner_can_hold_active_lease(tmp_path):
 
 
 def test_expired_lease_can_be_taken_over_with_new_fencing_token(tmp_path):
-    store = ExecutionLeaseStore(str(tmp_path / "leases.json"), ttl_seconds=-1)
+    path = tmp_path / "leases.json"
+    store = ExecutionLeaseStore(str(path), ttl_seconds=60)
     first = store.acquire("e1", "node-a")
+    raw = json.loads(path.read_text())
+    raw["e1"]["expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    path.write_text(json.dumps(raw))
     second = store.acquire("e1", "node-b")
     assert first is not None
     assert second is not None
