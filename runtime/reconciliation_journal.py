@@ -1,0 +1,57 @@
+"""Durable, idempotent journal for recovery reconciliation intents."""
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+import json, os
+from pathlib import Path
+from typing import Optional
+try: import fcntl
+except ImportError: fcntl = None
+
+@dataclass(frozen=True)
+class ReconciliationRecord:
+    intent_key: str
+    execution_id: Optional[str]
+    status: str = "pending"
+    result: object = None
+    updated_at: str = ""
+
+class ReconciliationJournal:
+    def __init__(self, path="data/reconciliation_journal.json"):
+        self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True); self.lock_path=self.path.with_suffix(self.path.suffix+".lock")
+        if not self.path.exists():
+            with self._lock():
+                if not self.path.exists(): self._write({})
+    def _lock(self):
+        class Lock:
+            def __enter__(s):
+                self.lock_path.touch(exist_ok=True); s.h=self.lock_path.open("r+")
+                if fcntl: fcntl.flock(s.h.fileno(),fcntl.LOCK_EX)
+                return s
+            def __exit__(s,*a):
+                if fcntl: fcntl.flock(s.h.fileno(),fcntl.LOCK_UN)
+                s.h.close()
+        return Lock()
+    def _read(self):
+        try:return json.loads(self.path.read_text(encoding="utf-8"))
+        except FileNotFoundError:return {}
+    def _write(self,data):
+        tmp=self.path.with_suffix(self.path.suffix+".tmp"); tmp.write_text(json.dumps(data,ensure_ascii=False,sort_keys=True,indent=2),encoding="utf-8")
+        with tmp.open("r+") as h:h.flush();os.fsync(h.fileno())
+        tmp.replace(self.path)
+    def get(self,intent_key):
+        with self._lock():
+            raw=self._read().get(intent_key); return ReconciliationRecord(**raw) if raw else None
+    def begin(self,intent_key,execution_id=None):
+        with self._lock():
+            data=self._read(); raw=data.get(intent_key)
+            if raw:return ReconciliationRecord(**raw)
+            record=ReconciliationRecord(intent_key,execution_id,"pending",None,datetime.now(timezone.utc).isoformat()); data[intent_key]=asdict(record); self._write(data); return record
+    def complete(self,intent_key,result): return self._set(intent_key,"completed",result)
+    def fail(self,intent_key,result=None): return self._set(intent_key,"failed",result)
+    def _set(self,intent_key,status,result):
+        with self._lock():
+            data=self._read(); raw=data.get(intent_key)
+            if raw and raw.get("status") in {"completed","failed"}:return ReconciliationRecord(**raw)
+            record=ReconciliationRecord(intent_key,raw.get("execution_id") if raw else None,status,result,datetime.now(timezone.utc).isoformat()); data[intent_key]=asdict(record); self._write(data); return record
+    def pending(self):
+        with self._lock():return [ReconciliationRecord(**r) for r in self._read().values() if r.get("status")=="pending"]
