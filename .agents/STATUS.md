@@ -1,56 +1,41 @@
 # AIOS New Architecture — Shared Agent Status
 
 ## Current phase
-- Phase: project-definition and new-architecture plan migration, then canonical execution consolidation
+- Phase: P0 execution hardening → P1 AIOS subsystem completion
 - Branch: `canonical-execution`
 - Source architecture line: `JoTalbot/AIOS:new`
 
-## Active agents
+## Completed this batch
+- Restored project purpose, original AIOS positioning and new-architecture plan.
+- Added `pyproject.toml` with package/dependency/dev-tool contract.
+- Added full CI workflow for tests, lint and security regression suite.
+- Added architecture guards and regression tests.
+- Added roadmap covering P0/P1/P2/P3 completion.
+- Added ADRs for canonical execution authority, cognition/runtime boundary, derived events and file-backed persistence scope.
+- Created GitHub issues for the next P0/P1 architecture work.
 
-| Agent | Task | Branch | Status |
-|---|---|---|---|
-| current | project definition / plan migration and canonical execution consolidation | `canonical-execution` | in progress |
+## P0 blockers
+1. Atomic execution version + fencing CAS — GitHub issue #1.
+2. Fault-injection crash consistency suite — GitHub issue #2.
 
-## Completed
-- Established dedicated new-architecture repository line.
-- Restored the original AIOS project positioning and purpose in `README.md` and `PROJECT.md`.
-- Preserved the original AIOS v1 architecture description in `docs/AIOS_V1.md`.
-- Ported the vNext architecture contract to `docs/ARCHITECTURE.md`.
-- Preserved the development plan used by `JoTalbot/AIOS:new` in `docs/NEW_ARCHITECTURE_PLAN.md`.
-- Aligned `AGENTS.md` with the AIOS2 canonical-execution branch.
-- Verified shared agent protocol, status, memory, architect role and reusable skills are present in AIOS2.
-- Mapped execution lifecycle, persistence, journal, audit, lease and recovery boundaries.
-- Added the canonical execution invariants contract in `docs/EXECUTION_INVARIANTS.md`.
-- Routed autonomous-loop lifecycle checkpoints through `ExecutionCommitCoordinator`.
-- Routed recovery failure mutations through the same coordinator; direct recovery failure persistence is no longer supported.
-- Shared one coordinator through `RuntimeOrchestrator` and `RuntimeFactory`.
-- Added process-level file locking to the file-backed lease adapter.
-- Hardened journal sequence allocation across quarantined/corrupt records.
-- Fixed journal checksum recomputation when commit status changes from `pending` to `applied`/`reconciled`.
-- Added regression tests for canonical audit, reconciliation idempotency, journal integrity and lease ownership.
-- Enforced that persistent `AutonomousExecutionLoop` instances receive an explicit checkpoint/commit boundary.
-- Exposed canonical `execution_id` on `LoopResult` for control-plane correlation.
-- Replaced the duplicate scheduler-based `VNextOrchestrator` execution world with a facade over `RuntimeOrchestrator`.
-- Added crash-consistency and persistence-boundary documentation/tests.
-- Added lease fencing generation support and stale-owner checks.
+## P1 work queue
+3. Unified capability/policy engine — issue #3.
+4. Durable Memory runtime — issue #4.
+5. LLM provider abstraction — issue #5.
+6. Cognition/runtime separation — issue #6.
 
-## Current architecture work
+## Architecture invariants
 - One durable execution authority: `RuntimeOrchestrator` → `AutonomousExecutionLoop`.
 - One lifecycle mutation authority: `ExecutionCommitCoordinator` → Journal / Store / Audit.
-- vNext orchestration is a facade over the canonical runtime; it no longer creates a second scheduler execution world.
-- Agent → Tool Registry → Permission Boundary → Tool Executor.
-- Recovery: Bootstrap → Policy / Queue → Lease → Resume.
-- Persistence adapters remain replaceable behind runtime boundaries.
-- Journal integrity is enforced on every record rewrite, including lifecycle status changes.
+- Runtime lifecycle mutations must not bypass the canonical commit path.
+- Mutable execution state requires monotonic version/CAS semantics.
+- Worker mutations require valid lease ownership and fencing generation at the persistence boundary.
+- Events are derived from committed durable state, never a second state authority.
+- Cognition decides WHAT/WHY; Runtime guarantees HOW/WHEN.
+- Persistence adapters are replaceable; file-backed adapters are not the distributed production contract.
 
-## Next actions
-1. Finish fencing-token propagation into the persistence mutation boundary.
-2. Run the complete test suite and targeted recovery/concurrency tests in CI.
-3. Audit all remaining direct lifecycle mutations (`ExecutionStore.save/transition`) and classify setup-only persistence versus runtime mutation.
-4. Add crash-window tests for journal/store/audit ordering.
-5. Add integration tests for stale lease ownership and recovery takeover.
-6. Evaluate a distributed persistence/lease adapter for multi-machine production use.
-7. Record architectural decisions and handoffs here or in docs/ADR.
+## Delivery rule
+All source, test, documentation, configuration and architecture changes are written directly to GitHub on `canonical-execution`. Each completed atomic batch must be committed/pushed before reporting completion.
 
 ## Rules
 Every agent updates this file before and after significant work. GitHub is the source of truth; do not rely on local chat history.
