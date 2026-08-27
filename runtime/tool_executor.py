@@ -72,8 +72,6 @@ class ToolExecutor:
                         self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed")
                     self._idempotent_results[key] = result
                 elif claimed_intent and self.intent_store:
-                    # A failed/timeout/cancelled call may have performed a side effect.
-                    # Leave it explicitly ambiguous; callers must reconcile rather than replay.
                     self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
                     result = ToolResult.failure(call, RuntimeError(result.error or "tool outcome is ambiguous"), retryable=False)
                 return result
@@ -87,9 +85,6 @@ class ToolExecutor:
         if self.idempotency_store:
             stored = self.idempotency_store.get(intent.idempotency_key)
             if stored:
-                current = self.intent_store.get(intent.idempotency_key) if self.intent_store else None
-                if self.intent_store and current and current.state in {"ambiguous", "executing"}:
-                    self.intent_store.mark(intent.idempotency_key, "completed")
                 return ToolResult(intent.call_id, intent.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
         result = resolver(intent)
         if hasattr(result, "__await__"):
@@ -98,14 +93,13 @@ class ToolExecutor:
             return None
         if not isinstance(result, ToolResult):
             raise TypeError("resolver must return ToolResult or None")
-        if result.ok:
-            if self.idempotency_store:
-                self.idempotency_store.put_if_absent(StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, True, result.value))
-            if self.intent_store:
-                current = self.intent_store.get(intent.idempotency_key)
-                if current and current.state in {"ambiguous", "executing"}:
-                    self.intent_store.mark(intent.idempotency_key, "completed")
+        if result.ok and self.idempotency_store:
+            self.idempotency_store.put_if_absent(StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, True, result.value))
         return result
+
+    async def _publish(self, event_type: str, context: ExecutionContext, data: dict):
+        if self.event_bus:
+            await self.event_bus.publish(event_type, ExecutionEvent(event_type, context, data))
 
     async def _execute_once(self, call: ToolCall, context: ToolExecutionContext, execution_context: ExecutionContext | None = None) -> ToolResult:
         ctx = execution_context or ExecutionContext(agent_id=context.agent_id)
@@ -123,14 +117,6 @@ class ToolExecutor:
         except ToolBoundaryError:
             raise
         except Exception as exc:
-            # A plain executor call is retryable because no durable intent claim
-            # exists to prove whether an external side effect committed. When a
-            # durable intent is active, execute() converts this to an explicit
-            # ambiguous outcome instead of replaying the side effect.
             result = ToolResult.failure(call, exc, retryable=True)
             await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": True, "idempotency_key": call.idempotency_key})
             return result
-
-    async def _publish(self, event_type: str, context: ExecutionContext, data: dict):
-        if self.event_bus:
-            await self.event_bus.publish(event_type, ExecutionEvent(event_type, context, data))
