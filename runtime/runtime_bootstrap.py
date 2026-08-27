@@ -4,6 +4,8 @@ import inspect
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from .execution_audit import ExecutionAuditLog
+from .execution_commit import ExecutionCommitCoordinator
 from .execution_lease import ExecutionLeaseStore
 from .execution_store import ExecutionStore
 from .recovery_manager import RecoveryManager
@@ -24,12 +26,13 @@ class RecoveryReport:
     manual_review: int = 0
 
 class RuntimeBootstrap:
-    def __init__(self, store=None, recovery_manager=None, lease_store=None, owner_id="aios-runtime", heartbeat_interval=None, commit_coordinator=None, recovery_policy=None, recovery_queue=None):
+    def __init__(self, store=None, recovery_manager=None, lease_store=None, owner_id="aios-runtime", heartbeat_interval=None, commit_coordinator=None, recovery_policy=None, recovery_queue=None, audit_log=None):
         self.store = store or ExecutionStore()
         self.lease_store = lease_store or ExecutionLeaseStore()
         self.owner_id = owner_id
         self.heartbeat_interval = heartbeat_interval if heartbeat_interval is not None else max(0.1, self.lease_store.ttl_seconds / 3)
-        self.commit_coordinator = commit_coordinator
+        self.audit_log = audit_log or ExecutionAuditLog()
+        self.commit_coordinator = commit_coordinator or ExecutionCommitCoordinator(self.store, self.audit_log)
         self.recovery_manager = recovery_manager or RecoveryManager(self.store, commit_coordinator=self.commit_coordinator)
         self.recovery_policy = recovery_policy or RecoveryPolicy()
         self.recovery_queue = recovery_queue or RecoveryQueue()
