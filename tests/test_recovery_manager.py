@@ -22,16 +22,16 @@ async def test_recovery_manager_resumes_pending_executions(tmp_path):
     loop = Loop()
     results = await RecoveryManager(store).recover(loop, "agent-1")
 
-    assert results == [("e1", "resumed")]
+    assert [r.as_dict() for r in results] == [{"execution_id": "e1", "status": "recovered"}]
     assert loop.calls == [("finish task", "agent-1")]
 
 
 def test_recovery_manager_marks_failed_execution(tmp_path):
     store = ExecutionStore(str(tmp_path / "executions.json"))
     state = store.save(ExecutionState("e1", status="running"))
-    updated = RecoveryManager(store).mark_failed(state, RuntimeError("crash"))
-    assert updated.status == "failed"
-    assert updated.error == "crash"
+    assert RecoveryManager(store).mark_failed(state, RuntimeError("crash")) is True
+    assert store.get("e1").status == "failed"
+    assert store.get("e1").error == "crash"
 
 
 @pytest.mark.asyncio
@@ -48,7 +48,10 @@ async def test_recovery_manager_isolates_one_failed_resume(tmp_path):
 
     results = await RecoveryManager(store).recover(FlakyLoop(), "agent")
 
-    assert results == [("good", "ok")]
+    assert [r.as_dict() for r in results] == [
+        {"execution_id": "bad", "status": "failed"},
+        {"execution_id": "good", "status": "recovered"},
+    ]
     assert store.get("bad").status == "failed"
     assert store.get("bad").error == "resume failed"
     assert store.get("good").status == "retrying"
