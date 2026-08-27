@@ -7,26 +7,16 @@ def test_audit_events_are_read_under_audit_lock(tmp_path, monkeypatch):
     log.append(ExecutionAuditEvent("exec-1", "pending", "running", attempt=1))
     calls = []
 
-    class ObservedLock:
-        def __enter__(self):
-            calls.append("enter")
-            return self
+    class ObservedFcntl:
+        LOCK_EX = 1
 
-        def __exit__(self, *args):
-            calls.append("exit")
-            return False
+        @staticmethod
+        def flock(fd, operation):
+            calls.append(operation)
 
-    monkeypatch.setattr(log, "lock_path", tmp_path / "observed.lock")
-    monkeypatch.setattr("runtime.execution_audit.fcntl", None)
-    original_open = log.lock_path.open
-
-    class LockPath:
-        def open(self, *args, **kwargs):
-            return ObservedLock()
-
-    monkeypatch.setattr(log, "lock_path", LockPath())
+    monkeypatch.setattr("runtime.execution_audit.fcntl", ObservedFcntl)
     assert len(log.events("exec-1")) == 1
-    assert calls == ["enter", "exit"]
+    assert calls == [ObservedFcntl.LOCK_EX, ObservedFcntl.LOCK_EX]
 
 
 def test_store_atomic_replace_syncs_parent_directory(tmp_path, monkeypatch):
