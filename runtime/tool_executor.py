@@ -11,7 +11,7 @@ from .event_types import TOOL_COMPLETED, TOOL_FAILED, TOOL_STARTED
 from .tool_idempotency_store import StoredToolResult, ToolIdempotencyStore
 from .tool_intent_store import ToolIntent, ToolIntentStore
 from .tool_protocol import ToolCall, ToolResult
-from .tool_sandbox import ToolExecutionContext, ToolSandbox
+from .tool_sandbox import ToolBoundaryError, ToolExecutionContext, ToolSandbox
 from .tool_registry import ToolPermissionError
 
 
@@ -23,12 +23,18 @@ class ToolExecutor:
         self._idempotent_locks: Dict[str, asyncio.Lock] = {}
 
     async def execute(self, call: ToolCall, context: ToolExecutionContext, execution_context: ExecutionContext | None = None) -> ToolResult:
+        if not isinstance(call, ToolCall):
+            raise ToolBoundaryError("typed ToolCall is required")
+        if not isinstance(context, ToolExecutionContext) or not context.agent_id:
+            raise ToolBoundaryError("trusted ToolExecutionContext is required")
         key = call.idempotency_key
-        if not key: return await self._execute_once(call, context, execution_context)
+        if not key:
+            return await self._execute_once(call, context, execution_context)
         lock = self._idempotent_locks.setdefault(key, asyncio.Lock())
         async with lock:
             cached = self._idempotent_results.get(key)
-            if cached is not None: return cached
+            if cached is not None:
+                return cached
             if self.idempotency_store:
                 stored = self.idempotency_store.get(key)
                 if stored:
@@ -36,6 +42,7 @@ class ToolExecutor:
                     self._idempotent_results[key] = result
                     return result
             claim_owner, claim_token = f"executor:{uuid.uuid4().hex}", uuid.uuid4().hex
+            claimed_intent = False
             if self.intent_store:
                 intent = self.intent_store.prepare(ToolIntent(key, call.call_id, call.tool, call.arguments, getattr(execution_context, "execution_id", None)))
                 if intent.state == "completed" and self.idempotency_store:
@@ -54,18 +61,25 @@ class ToolExecutor:
                             self._idempotent_results[key] = result
                             return result
                     return ToolResult.failure(call, RuntimeError("intent is already claimed"))
+                claimed_intent = True
             try:
                 result = await self._execute_once(call, context, execution_context)
                 if result.ok:
                     if self.idempotency_store:
                         stored = self.idempotency_store.put_if_absent(StoredToolResult(key, call.call_id, call.tool, True, result.value))
                         result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
-                    if self.intent_store: self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed")
+                    if self.intent_store:
+                        self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed")
                     self._idempotent_results[key] = result
-                elif self.intent_store:
+                elif claimed_intent and self.intent_store:
+                    # A failed/timeout/cancelled call may have performed a side effect.
+                    # Leave it explicitly ambiguous; callers must reconcile rather than replay.
                     self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
+                    result = ToolResult.failure(call, RuntimeError(result.error or "tool outcome is ambiguous"), retryable=False)
                 return result
             except asyncio.CancelledError:
+                if claimed_intent and self.intent_store:
+                    self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
                 raise
 
     async def reconcile_intent(self, intent: ToolIntent, resolver):
@@ -78,11 +92,15 @@ class ToolExecutor:
                     self.intent_store.mark(intent.idempotency_key, "completed")
                 return ToolResult(intent.call_id, intent.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
         result = resolver(intent)
-        if hasattr(result, "__await__"): result = await result
-        if result is None: return None
-        if not isinstance(result, ToolResult): raise TypeError("resolver must return ToolResult or None")
+        if hasattr(result, "__await__"):
+            result = await result
+        if result is None:
+            return None
+        if not isinstance(result, ToolResult):
+            raise TypeError("resolver must return ToolResult or None")
         if result.ok:
-            if self.idempotency_store: self.idempotency_store.put_if_absent(StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, True, result.value))
+            if self.idempotency_store:
+                self.idempotency_store.put_if_absent(StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, True, result.value))
             if self.intent_store:
                 current = self.intent_store.get(intent.idempotency_key)
                 if current and current.state in {"ambiguous", "executing"}:
@@ -98,12 +116,19 @@ class ToolExecutor:
             result = value if isinstance(value, ToolResult) else ToolResult.success(call, value)
             await self._publish(TOOL_COMPLETED, ctx, {"tool": call.tool, "call_id": call.call_id, "idempotency_key": call.idempotency_key})
             return result
-        except asyncio.CancelledError: raise
-        except ToolPermissionError: raise
+        except asyncio.CancelledError:
+            raise
+        except ToolPermissionError:
+            raise
+        except ToolBoundaryError:
+            raise
         except Exception as exc:
-            retryable = isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError, RuntimeError))
-            result = ToolResult.failure(call, exc, retryable=retryable)
-            await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": retryable, "idempotency_key": call.idempotency_key}); return result
+            # Never label an unknown/timeout failure retryable: the external
+            # operation may have committed before the exception was observed.
+            result = ToolResult.failure(call, exc, retryable=False)
+            await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": False, "idempotency_key": call.idempotency_key})
+            return result
 
     async def _publish(self, event_type: str, context: ExecutionContext, data: dict):
-        if self.event_bus: await self.event_bus.publish(event_type, ExecutionEvent(event_type, context, data))
+        if self.event_bus:
+            await self.event_bus.publish(event_type, ExecutionEvent(event_type, context, data))
