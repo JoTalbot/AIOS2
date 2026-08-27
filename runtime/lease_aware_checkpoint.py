@@ -2,7 +2,6 @@
 
 from .recovery_checkpoint import RecoveryCheckpoint
 
-
 class LeaseAwareCheckpoint:
     def __init__(self, checkpoint: RecoveryCheckpoint, lease_store, owner_id: str):
         self.checkpoint, self.lease_store, self.owner_id = checkpoint, lease_store, owner_id
@@ -20,7 +19,7 @@ class LeaseAwareCheckpoint:
                 self._fences[execution_id] = token
         if token is not None and self.lease_store.owns_token(execution_id, self.owner_id, token):
             return token
-        raise RuntimeError(f"execution '{execution_id}' lease fence is not owned by '{self.owner_id}'")
+        raise RuntimeError(f"execution '{execution_id}' lease is not owned by '{self.owner_id}'")
 
     def _fence(self, state, *, acquire=False):
         token = self._assert_owner(state.execution_id, acquire=acquire)
