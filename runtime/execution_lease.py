@@ -1,4 +1,4 @@
-"""Process-safe file-backed execution lease with renewal for recovery."""
+"""Process-safe file-backed execution lease with fencing for recovery."""
 
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -18,6 +18,7 @@ class ExecutionLease:
     execution_id: str
     owner_id: str
     expires_at: str
+    fencing_token: int
 
 
 class ExecutionLeaseStore:
@@ -59,7 +60,8 @@ class ExecutionLeaseStore:
             current = data.get(execution_id)
             if current and datetime.fromisoformat(current["expires_at"]) > now and current["owner_id"] != owner_id:
                 return None
-            return self._store(execution_id, owner_id, data, now)
+            next_token = int(current.get("fencing_token", 0)) + 1 if current else 1
+            return self._store(execution_id, owner_id, data, now, next_token)
 
     def renew(self, execution_id: str, owner_id: str) -> Optional[ExecutionLease]:
         now = datetime.now(timezone.utc)
@@ -68,16 +70,33 @@ class ExecutionLeaseStore:
             current = data.get(execution_id)
             if not current or current["owner_id"] != owner_id or datetime.fromisoformat(current["expires_at"]) <= now:
                 return None
-            return self._store(execution_id, owner_id, data, now)
+            return self._store(execution_id, owner_id, data, now, int(current.get("fencing_token", 1)))
 
     def is_owner(self, execution_id: str, owner_id: str) -> bool:
         with self._lock():
             current = self._read().get(execution_id)
             return bool(current and current["owner_id"] == owner_id and datetime.fromisoformat(current["expires_at"]) > datetime.now(timezone.utc))
 
-    def _store(self, execution_id, owner_id, data, now):
-        lease = ExecutionLease(execution_id, owner_id, (now + timedelta(seconds=self.ttl_seconds)).isoformat())
-        data[execution_id] = {"owner_id": lease.owner_id, "expires_at": lease.expires_at}
+    def fencing_token(self, execution_id: str) -> Optional[int]:
+        """Return the current fencing token for an execution."""
+        with self._lock():
+            current = self._read().get(execution_id)
+            return int(current["fencing_token"]) if current and "fencing_token" in current else None
+
+    def owns_token(self, execution_id: str, owner_id: str, fencing_token: int) -> bool:
+        """Validate both owner and fencing generation before a mutation."""
+        with self._lock():
+            current = self._read().get(execution_id)
+            return bool(
+                current
+                and current["owner_id"] == owner_id
+                and int(current.get("fencing_token", 0)) == fencing_token
+                and datetime.fromisoformat(current["expires_at"]) > datetime.now(timezone.utc)
+            )
+
+    def _store(self, execution_id, owner_id, data, now, fencing_token):
+        lease = ExecutionLease(execution_id, owner_id, (now + timedelta(seconds=self.ttl_seconds)).isoformat(), fencing_token)
+        data[execution_id] = {"owner_id": lease.owner_id, "expires_at": lease.expires_at, "fencing_token": lease.fencing_token}
         self._write(data)
         return lease
 
