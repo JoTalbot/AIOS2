@@ -16,9 +16,8 @@ def _coordinator(tmp_path):
     )
 
 
-def test_recovery_preserves_valid_prefix_and_quarantines_corruption(tmp_path):
-    coordinator = _coordinator(tmp_path)
-    valid = ExecutionCommit(
+def _valid_commit():
+    return ExecutionCommit(
         "exec-27:1:completed:corr-27",
         "exec-27",
         "running",
@@ -27,6 +26,11 @@ def test_recovery_preserves_valid_prefix_and_quarantines_corruption(tmp_path):
         {"ok": True},
         correlation_id="corr-27",
     )
+
+
+def test_recovery_preserves_valid_prefix_and_quarantines_corruption(tmp_path):
+    coordinator = _coordinator(tmp_path)
+    valid = _valid_commit()
     coordinator._append_journal(valid)
     journal = Path(coordinator.journal_path)
     journal.write_text(
@@ -45,14 +49,15 @@ def test_recovery_preserves_valid_prefix_and_quarantines_corruption(tmp_path):
 
 def test_recovery_does_not_promote_quarantined_data(tmp_path):
     coordinator = _coordinator(tmp_path)
+    valid = coordinator._append_journal(_valid_commit())
     Path(coordinator.journal_path).write_text(
-        '{"commit_id":"valid:1","execution_id":"exec-27","from_state":"running","to_state":"completed","sequence":1,"metadata":{}}\n'
-        "{not-json}\n",
+        Path(coordinator.journal_path).read_text(encoding="utf-8") + "{not-json}\n",
         encoding="utf-8",
     )
 
     commits = coordinator._read_journal()
 
     assert len(commits) == 1
-    assert commits[0].commit_id == "valid:1"
-    assert not Path(coordinator.quarantine_path).read_text(encoding="utf-8").strip() == "{not-json}"
+    assert commits[0].commit_id == valid.commit_id
+    quarantine = Path(coordinator.quarantine_path).read_text(encoding="utf-8")
+    assert "not-json" in quarantine
