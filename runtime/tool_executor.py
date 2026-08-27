@@ -43,6 +43,7 @@ class ToolExecutor:
                     return result
             claim_owner, claim_token = f"executor:{uuid.uuid4().hex}", uuid.uuid4().hex
             claimed_intent = False
+            heartbeat = None
             if self.intent_store:
                 intent = self.intent_store.prepare(ToolIntent(key, call.call_id, call.tool, call.arguments, getattr(execution_context, "execution_id", None)))
                 if intent.state == "completed" and self.idempotency_store:
@@ -62,6 +63,7 @@ class ToolExecutor:
                             return result
                     return ToolResult.failure(call, RuntimeError("intent is already claimed"))
                 claimed_intent = True
+                heartbeat = asyncio.create_task(self._claim_heartbeat(key, claim_owner, claim_token))
             try:
                 result = await self._execute_once(call, context, execution_context)
                 if result.ok:
@@ -72,8 +74,6 @@ class ToolExecutor:
                         self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed")
                     self._idempotent_results[key] = result
                 elif claimed_intent and self.intent_store:
-                    # A failed/timeout/cancelled call may have performed a side effect.
-                    # Leave it explicitly ambiguous; callers must reconcile rather than replay.
                     self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
                     result = ToolResult.failure(call, RuntimeError(result.error or "tool outcome is ambiguous"), retryable=False)
                 return result
@@ -81,6 +81,22 @@ class ToolExecutor:
                 if claimed_intent and self.intent_store:
                     self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
                 raise
+            finally:
+                if heartbeat:
+                    heartbeat.cancel()
+                    await asyncio.gather(heartbeat, return_exceptions=True)
+
+    async def _claim_heartbeat(self, key, owner_id, claim_token):
+        """Keep a live intent claim from expiring while a tool is running."""
+        ttl = max(1, getattr(self.intent_store, "claim_ttl_seconds", 60))
+        interval = max(0.25, ttl / 3)
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                if not self.intent_store.renew_claim(key, owner_id, claim_token):
+                    return
+        except asyncio.CancelledError:
+            raise
 
     async def reconcile_intent(self, intent: ToolIntent, resolver):
         """Resolve an ambiguous operation without replaying its side effect."""
@@ -123,8 +139,6 @@ class ToolExecutor:
         except ToolBoundaryError:
             raise
         except Exception as exc:
-            # Never label an unknown/timeout failure retryable: the external
-            # operation may have committed before the exception was observed.
             result = ToolResult.failure(call, exc, retryable=False)
             await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": False, "idempotency_key": call.idempotency_key})
             return result
