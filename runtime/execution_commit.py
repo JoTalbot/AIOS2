@@ -13,7 +13,7 @@ from .execution_store import ExecutionConcurrencyError, ExecutionState, Executio
 
 try:
     import fcntl
-except ImportError:  # pragma: no cover - Windows fallback keeps API usable.
+except ImportError:
     fcntl = None
 
 
@@ -48,9 +48,9 @@ class CorruptJournalError(ValueError):
 class ExecutionCommitCoordinator:
     """The single lifecycle mutation boundary for durable executions."""
 
-    def __init__(self, store: ExecutionStore, audit_log: ExecutionAuditLog, journal_path: str = "data/execution_commits.jsonl", quarantine_path: str = "data/execution_commits.quarantine.jsonl"):
+    def __init__(self, store: ExecutionStore, audit_log: Optional[ExecutionAuditLog] = None, journal_path: str = "data/execution_commits.jsonl", quarantine_path: str = "data/execution_commits.quarantine.jsonl"):
         self.store = store
-        self.audit_log = audit_log
+        self.audit_log = audit_log or ExecutionAuditLog()
         self.journal_path = Path(journal_path)
         self.quarantine_path = Path(quarantine_path)
         self.lock_path = self.journal_path.with_suffix(self.journal_path.suffix + ".lock")
@@ -90,6 +90,14 @@ class ExecutionCommitCoordinator:
             handle.flush()
         return commit
 
+    def _append_journal(self, commit: ExecutionCommit):
+        """Compatibility entry point for recovery/fault-injection tooling.
+
+        It only appends a durable intent; it does not mutate execution state.
+        """
+        with self._lock():
+            return self._append_journal_unlocked(commit)
+
     def _rewrite_unlocked(self, commits):
         tmp = self.journal_path.with_suffix(self.journal_path.suffix + ".tmp")
         tmp.write_text("".join(json.dumps(asdict(c.with_integrity()), ensure_ascii=False, default=str) + "\n" for c in commits), encoding="utf-8")
@@ -124,13 +132,6 @@ class ExecutionCommitCoordinator:
             handle.write(json.dumps({"reason": reason, "line": line, "quarantined_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False) + "\n")
 
     def commit(self, state: ExecutionState, to_status: str, *, checkpoint=None, reason=None, updates=None, fencing_token: Optional[int] = None):
-        """Commit one validated lifecycle transition using optimistic CAS.
-
-        The journal record is the durable intent. If the store transition wins,
-        the record is marked applied. Repeating an already-applied transition
-        returns the original journal record instead of manufacturing a second
-        commit id.
-        """
         current = self.store.get(state.execution_id) or state
         updates = dict(updates or {})
         if to_status == "completed" and checkpoint is not None:
@@ -140,8 +141,6 @@ class ExecutionCommitCoordinator:
         effective_fence = fencing_token if fencing_token is not None else current.fencing_token
         with self._lock():
             commits = self._read_journal_unlocked()
-            # Idempotent retry after the canonical store already applied the
-            # transition: return the exact original durable commit.
             if current.status == to_status and current.version > 0:
                 for existing in reversed(commits):
                     if existing.execution_id == current.execution_id and existing.to_status == to_status and existing.expected_version == current.version - 1 and existing.fencing_token == effective_fence:
@@ -152,8 +151,8 @@ class ExecutionCommitCoordinator:
                 if existing.commit_id == commit_id:
                     return existing
             commit = self._append_journal_unlocked(ExecutionCommit(commit_id, current.execution_id, current.status, to_status, current.attempt, checkpoint, reason, correlation_id=current.correlation_id, expected_version=expected_version, fencing_token=effective_fence))
-            self.store.transition(current.execution_id, to_status, _audit=False, expected_version=expected_version, fencing_token=effective_fence, **updates)
-            self.audit_log.append(ExecutionAuditEvent(current.execution_id, current.status, to_status, current.attempt, reason, correlation_id=current.correlation_id, event_id=commit_id))
+            updated = self.store.transition(current.execution_id, to_status, _audit=False, expected_version=expected_version, fencing_token=effective_fence, **updates)
+            self.audit_log.append(ExecutionAuditEvent(current.execution_id, current.status, to_status, current.attempt, reason, correlation_id=current.correlation_id, event_id=commit_id, version=updated.version))
             self._mark_unlocked(commit_id, "applied")
             return commit
 
@@ -173,7 +172,7 @@ class ExecutionCommitCoordinator:
                 if not state:
                     continue
                 if state.status == commit.to_status and state.version > (commit.expected_version or -1):
-                    self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id))
+                    self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id, version=state.version))
                     self._mark_unlocked(commit.commit_id, "reconciled")
                     repaired.append(commit.commit_id)
                     continue
@@ -186,10 +185,10 @@ class ExecutionCommitCoordinator:
                 elif commit.to_status == "failed":
                     updates["error"] = commit.reason
                 try:
-                    self.store.transition(commit.execution_id, commit.to_status, _audit=False, expected_version=commit.expected_version, fencing_token=commit.fencing_token, **updates)
+                    updated = self.store.transition(commit.execution_id, commit.to_status, _audit=False, expected_version=commit.expected_version, fencing_token=commit.fencing_token, **updates)
                 except ExecutionConcurrencyError:
                     continue
-                self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id))
+                self.audit_log.append(ExecutionAuditEvent(commit.execution_id, commit.from_status, commit.to_status, commit.attempt, commit.reason, correlation_id=commit.correlation_id, event_id=commit.commit_id, version=updated.version))
                 self._mark_unlocked(commit.commit_id, "reconciled")
                 repaired.append(commit.commit_id)
         return repaired
