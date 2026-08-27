@@ -257,11 +257,9 @@ class ExecutionStore:
         )
         data[state.execution_id] = asdict(persisted)
         # Do not mutate the caller's object until the durable rename succeeds.
-        # A failed disk write must leave the caller holding the same version it
-        # can safely retry, rather than manufacturing a false local revision.
         self._write(data)
-        for key, value in asdict(persisted).items():
-            setattr(state, key, value)
+        state.version = persisted.version
+        state.updated_at = persisted.updated_at
 
         if self.audit_log and old_status != state.status:
             self.audit_log.append(
