@@ -40,22 +40,32 @@ jobs:
           now_iso = sys.argv[2]
           data = json.load(open("scheduler-watchdog/runs.json", encoding="utf-8"))
           names = {"scheduler-probe", "runner-smoke", "tests", "security", "chaos-matrix"}
+          active = {"queued", "pending", "waiting", "requested", "in_progress"}
 
           print(f"observed_at={now_iso}")
-          print("workflow|run_id|status|created_at|queue_duration_seconds")
+          print("workflow|run_id|status|created_at|observed_at|queue_duration_upper_bound_seconds|run_started_at|allocated")
           for run in data.get("workflow_runs", []):
               name = run.get("name", "")
               if name not in names:
                   continue
               status = run.get("status", "")
-              if status not in {"queued", "pending", "waiting", "requested"}:
+              if status not in active:
                   continue
               created = run.get("created_at")
               if not created:
                   continue
               created_dt = dt.datetime.fromisoformat(created.replace("Z", "+00:00"))
-              duration = max(0, now_epoch - int(created_dt.timestamp()))
-              print(f"{name}|{run.get('id')}|{status}|{created}|{duration}")
+              created_epoch = created_dt.timestamp()
+              started = run.get("run_started_at")
+              allocated = bool(started)
+              # For queued/pending runs this is an upper bound on time spent
+              # waiting so far. For in_progress it remains the total
+              # creation-to-start latency, while run_started_at is retained.
+              duration = max(0, now_epoch - int(created_epoch))
+              print(
+                  f"{name}|{run.get('id')}|{status}|{created}|{now_iso}|{duration}|"
+                  f"{started or ''}|{str(allocated).lower()}"
+              )
           PY
 
           printf 'probe=watchdog-ok\n' | tee scheduler-watchdog/probe.txt
