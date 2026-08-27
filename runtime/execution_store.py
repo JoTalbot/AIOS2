@@ -12,7 +12,7 @@ from .execution_state_machine import ExecutionStateMachine
 
 try:
     import fcntl
-except ImportError:  # pragma: no cover - Windows fallback keeps API usable.
+except ImportError:  # pragma: no cover
     fcntl = None
 
 
@@ -38,10 +38,10 @@ class ExecutionState:
 class ExecutionStore:
     """Durable repository for execution snapshots.
 
-    Lifecycle orchestration should use ``ExecutionCommitCoordinator``. ``save``
-    remains available for initial snapshot creation and compatibility. Runtime
-    lifecycle transitions can require both an expected version and fencing token,
-    making stale workers unable to mutate a newer execution generation.
+    Runtime lifecycle mutation must use ``transition`` with an explicit
+    ``expected_version``. ``save`` is retained only for initial materialization
+    and compatibility; it refuses to overwrite an existing snapshot unless the
+    caller supplies the current version and fencing generation.
     """
 
     def __init__(self, path: str = "data/executions.json", state_machine: Optional[ExecutionStateMachine] = None, audit_log: Optional[ExecutionAuditLog] = None):
@@ -55,7 +55,6 @@ class ExecutionStore:
 
     @contextmanager
     def _lock(self):
-        """Serialize execution snapshot read-modify-write operations."""
         with self.lock_path.open("a+", encoding="utf-8") as handle:
             if fcntl is not None:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
@@ -76,16 +75,26 @@ class ExecutionStore:
         tmp.write_text(json.dumps(data, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
         tmp.replace(self.path)
 
-    def save(self, state: ExecutionState, *, _audit: bool = True) -> ExecutionState:
+    def save(self, state: ExecutionState, *, _audit: bool = True, expected_version: Optional[int] = None, fencing_token: Optional[int] = None) -> ExecutionState:
         with self._lock():
             data = self._read()
             previous = data.get(state.execution_id)
             if previous:
+                if expected_version is None:
+                    raise ExecutionConcurrencyError("existing execution requires expected_version")
+                actual = int(previous.get("version", 0))
+                if actual != expected_version:
+                    raise ExecutionConcurrencyError(f"execution {state.execution_id} version conflict: expected {expected_version}, actual {actual}")
+                actual_fence = previous.get("fencing_token")
+                if fencing_token is not None and actual_fence is not None and actual_fence != fencing_token:
+                    raise ExecutionConcurrencyError(f"execution {state.execution_id} fencing conflict: expected {fencing_token}, actual {actual_fence}")
                 self.state_machine.validate(previous.get("status", "pending"), state.status)
-                state.version = int(previous.get("version", 0)) + 1
+                state.version = actual + 1
             else:
                 state.version = int(state.version)
             old_status = previous.get("status", "pending") if previous else None
+            if fencing_token is not None:
+                state.fencing_token = fencing_token
             state.updated_at = datetime.now(timezone.utc).isoformat()
             data[state.execution_id] = asdict(state)
             self._write(data)
@@ -93,16 +102,7 @@ class ExecutionStore:
             self.audit_log.append(ExecutionAuditEvent(state.execution_id, old_status or "new", state.status, state.attempt, state.error, correlation_id=state.correlation_id))
         return state
 
-    def transition(
-        self,
-        execution_id: str,
-        status: str,
-        *,
-        _audit: bool = True,
-        expected_version: Optional[int] = None,
-        fencing_token: Optional[int] = None,
-        **updates,
-    ) -> ExecutionState:
+    def transition(self, execution_id: str, status: str, *, _audit: bool = True, expected_version: Optional[int] = None, fencing_token: Optional[int] = None, **updates) -> ExecutionState:
         with self._lock():
             data = self._read()
             raw = data.get(execution_id)
@@ -114,14 +114,12 @@ class ExecutionStore:
             else:
                 state = ExecutionState(**raw)
                 old_status = state.status
-            if expected_version is not None and state.version != expected_version:
-                raise ExecutionConcurrencyError(
-                    f"execution {execution_id} version conflict: expected {expected_version}, actual {state.version}"
-                )
+            if expected_version is None:
+                raise ExecutionConcurrencyError("lifecycle transition requires expected_version")
+            if state.version != expected_version:
+                raise ExecutionConcurrencyError(f"execution {execution_id} version conflict: expected {expected_version}, actual {state.version}")
             if fencing_token is not None and state.fencing_token is not None and state.fencing_token != fencing_token:
-                raise ExecutionConcurrencyError(
-                    f"execution {execution_id} fencing conflict: expected {fencing_token}, actual {state.fencing_token}"
-                )
+                raise ExecutionConcurrencyError(f"execution {execution_id} fencing conflict: expected {fencing_token}, actual {state.fencing_token}")
             self.state_machine.validate(state.status, status)
             state.status = status
             for key, value in updates.items():
