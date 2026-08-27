@@ -71,3 +71,23 @@ def test_commit_leaves_pending_intent_when_fencing_is_lost_after_journal_append(
     monkeypatch.setattr(lease_store, "is_owner_unlocked", lose_fence)
     pending = coordinator.commit(state, "completed", checkpoint={"fenced": True})
     assert pending.status == "pending"; assert store.get("exec-4").status == "running"; assert coordinator.pending()[0].commit_id == pending.commit_id; assert audit.events("exec-4") == []
+
+
+def test_journal_reader_uses_journal_lock(tmp_path, monkeypatch):
+    store = ExecutionStore(str(tmp_path / "executions.json")); audit = ExecutionAuditLog(str(tmp_path / "audit.jsonl"))
+    coordinator = ExecutionCommitCoordinator(store, audit, journal_path=str(tmp_path / "commits.jsonl"), quarantine_path=str(tmp_path / "quarantine.jsonl"))
+    coordinator._append_journal(ExecutionCommit("exec-5:1:completed:corr-5", "exec-5", "running", "completed", 1, {"ok": True}, correlation_id="corr-5"))
+    calls = []
+    class ObservedLock:
+        def __enter__(self):
+            calls.append(True)
+            return self
+        def __exit__(self, *args):
+            return False
+    monkeypatch.setattr("runtime.execution_commit._JournalLock", lambda path: ObservedLock())
+
+    commits = coordinator.pending()
+
+    assert len(commits) == 1
+    assert commits[0].commit_id == "exec-5:1:completed:corr-5"
+    assert calls == [True]
