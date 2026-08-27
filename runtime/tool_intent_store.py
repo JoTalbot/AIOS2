@@ -83,16 +83,17 @@ class ToolIntentStore:
             if not expiry or datetime.fromisoformat(expiry)<=datetime.now(timezone.utc):return None
             raw["state"],raw["owner_id"],raw["claim_token"],raw["claim_expires_at"]=state,None,None,None; self._write(data); return ToolIntent(**raw)
     def mark(self,key,state):
-        if state not in VALID_STATES: raise ValueError("invalid intent state")
+        if state not in {"completed","failed"}: raise ValueError("mark requires a terminal state")
         with _IntentLock(self.lock_path):
             data=self._read(); raw=data.get(key)
             if raw is None:return None
-            if state in {"completed","failed"}: return None
-            if raw.get("owner_id") is not None: return None
+            if raw.get("owner_id") is not None:return None
+            if raw.get("state") in {"completed","failed"}: return ToolIntent(**raw)
             raw["state"]=state; self._write(data); return ToolIntent(**raw)
     def pending(self):
         with _IntentLock(self.lock_path):return [ToolIntent(**raw) for raw in self._read().values() if raw.get("state") in AMBIGUOUS_STATES]
     def _write(self,data):
-        tmp=self.path.with_suffix(self.path.suffix+".tmp"); tmp.write_text(json.dumps(data,ensure_ascii=False,default=str,indent=2),encoding="utf-8")
+        tmp=self.path.with_suffix(self.suffix if hasattr(self,"suffix") else self.path.suffix+".tmp")
+        tmp.write_text(json.dumps(data,ensure_ascii=False,default=str,indent=2),encoding="utf-8")
         with tmp.open("r+",encoding="utf-8") as h:h.flush(); import os; os.fsync(h.fileno())
         tmp.replace(self.path)
