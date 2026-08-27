@@ -28,16 +28,13 @@ class ToolIntentRecoveryWorker:
         interval = max(0.1, self.claim_ttl_seconds / 3)
         while True:
             await asyncio.sleep(interval)
-            if not self.store.renew_claim(key, owner, token):
-                return
+            if not self.store.renew_claim(key, owner, token): return
 
     async def _recover_one(self, executor, resolver, intent):
-        lease = None
+        lease = None; owner = self.owner_id or "local-recovery"; claim_token = uuid.uuid4().hex
         if self.lease_store is not None:
             lease = self.lease_store.acquire(intent.idempotency_key, self.owner_id)
             if lease is None: return IntentRecoveryResult(intent.idempotency_key, "skipped_by_lease")
-        owner = self.owner_id or "local-recovery"
-        claim_token = uuid.uuid4().hex
         claimed = self.store.claim(intent.idempotency_key, owner, claim_token)
         if claimed is None:
             if lease is not None: self.lease_store.release(intent.idempotency_key, self.owner_id, lease.fencing_token)
@@ -48,9 +45,10 @@ class ToolIntentRecoveryWorker:
             while attempts < self.max_attempts:
                 attempts += 1
                 if lease is not None and not self.lease_store.is_owner(intent.idempotency_key, self.owner_id, lease.fencing_token): return IntentRecoveryResult(intent.idempotency_key, "skipped_by_lease", attempts)
-                if self.store.get(intent.idempotency_key) is None: return IntentRecoveryResult(intent.idempotency_key, "missing", attempts)
                 try: result = await executor.reconcile_intent(claimed, resolver)
-                except asyncio.CancelledError: raise
+                except asyncio.CancelledError:
+                    self.store.release_claim(intent.idempotency_key, owner, claim_token, "ambiguous")
+                    raise
                 except Exception: result = None
                 if result is not None:
                     state = "completed" if result.ok else "failed"
