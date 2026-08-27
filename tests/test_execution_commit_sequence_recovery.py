@@ -20,7 +20,9 @@ def test_sequence_remains_monotonic_after_quarantined_corruption(tmp_path):
     assert third.sequence == 3
     commits = coordinator._read_journal()
     assert [commit.sequence for commit in commits] == [1, 3]
-    assert len(coordinator.quarantine_path.read_text(encoding="utf-8").splitlines()) == 1
+    quarantine = coordinator.quarantine_path.read_text(encoding="utf-8").splitlines()
+    assert len(quarantine) == 1
+    assert '"sequence":2' in quarantine[0]
 
 
 def test_missing_sequence_is_not_silently_reused(tmp_path):
@@ -31,4 +33,7 @@ def test_missing_sequence_is_not_silently_reused(tmp_path):
     next_commit = coordinator._append_journal(ExecutionCommit("c5", "e1", "pending", "running", 0))
 
     assert next_commit.sequence == 5
-    assert [commit.sequence for commit in coordinator._read_journal()] == [1]
+    assert [commit.sequence for commit in coordinator._read_journal()] == [1, 5]
+    quarantine = coordinator.quarantine_path.read_text(encoding="utf-8").splitlines()
+    assert len(quarantine) == 1
+    assert '"sequence":4' in quarantine[0]
