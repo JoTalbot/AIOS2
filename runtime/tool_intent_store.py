@@ -93,7 +93,7 @@ class ToolIntentStore:
     def pending(self):
         with _IntentLock(self.lock_path):return [ToolIntent(**raw) for raw in self._read().values() if raw.get("state") in AMBIGUOUS_STATES]
     def _write(self,data):
-        tmp=self.path.with_suffix(self.suffix if hasattr(self,"suffix") else self.path.suffix+".tmp")
+        tmp=self.path.with_suffix(self.path.suffix+".tmp")
         tmp.write_text(json.dumps(data,ensure_ascii=False,default=str,indent=2),encoding="utf-8")
         with tmp.open("r+",encoding="utf-8") as h:h.flush(); import os; os.fsync(h.fileno())
         tmp.replace(self.path)
