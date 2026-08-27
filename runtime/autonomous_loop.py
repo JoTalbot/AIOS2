@@ -81,7 +81,8 @@ class AutonomousExecutionLoop:
 
     def _transition(self, state, status, **updates):
         if self.checkpoint:
-            return self.checkpoint.transition(state, status, **updates) and self.store.get(state.execution_id)
+            committed = self.checkpoint.transition(state, status, **updates)
+            return self.store.get(state.execution_id) if self.store else committed
         state.status = status
         for key, value in updates.items(): setattr(state, key, value)
         return state
