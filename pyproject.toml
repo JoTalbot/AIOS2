@@ -24,12 +24,8 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
-asyncio_mode = "auto"
-# These four files exercise the removed legacy scheduler/API surface. Keep
-# them visible in the repository for migration, but exclude them from the
-# canonical new-architecture gate until their tests are rewritten.
 addopts = "-ra --ignore=tests/test_agent_executor.py --ignore=tests/test_api_main.py --ignore=tests/test_fresh_runtime_execution_recovery.py --ignore=tests/test_pr252_scheduler_tool_integration.py"
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
