@@ -1,3 +1,5 @@
+import json
+
 from runtime.execution_commit import ExecutionCommit, ExecutionCommitCoordinator
 from runtime.execution_store import ExecutionStore
 from runtime.execution_audit import ExecutionAuditLog
@@ -9,10 +11,10 @@ def _coordinator(tmp_path):
     return ExecutionCommitCoordinator(store, audit, str(tmp_path / "commits.jsonl"))
 
 
-def _quarantine_lines(coordinator):
+def _quarantine_records(coordinator):
     if not coordinator.quarantine_path.exists():
         return []
-    return coordinator.quarantine_path.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in coordinator.quarantine_path.read_text(encoding="utf-8").splitlines()]
 
 
 def test_sequence_remains_monotonic_after_quarantined_corruption(tmp_path):
@@ -26,8 +28,8 @@ def test_sequence_remains_monotonic_after_quarantined_corruption(tmp_path):
     assert first.sequence == 1
     assert third.sequence == 3
     assert [commit.sequence for commit in coordinator._read_journal()] == [1, 3]
-    quarantine = _quarantine_lines(coordinator)
-    assert any('"sequence":2' in line and '"broken"' in line for line in quarantine)
+    quarantine = _quarantine_records(coordinator)
+    assert any(record["line"] == broken for record in quarantine)
 
 
 def test_missing_sequence_is_not_silently_reused(tmp_path):
@@ -40,5 +42,5 @@ def test_missing_sequence_is_not_silently_reused(tmp_path):
 
     assert next_commit.sequence == 5
     assert [commit.sequence for commit in coordinator._read_journal()] == [1, 5]
-    quarantine = _quarantine_lines(coordinator)
-    assert any('"sequence":4' in line and '"gap"' in line for line in quarantine)
+    quarantine = _quarantine_records(coordinator)
+    assert any(record["line"] == broken for record in quarantine)
