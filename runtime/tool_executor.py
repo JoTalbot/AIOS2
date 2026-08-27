@@ -38,6 +38,7 @@ class ToolExecutor:
                     self._idempotent_results[key] = result
                     return result
             claim_owner, claim_token = f"executor:{uuid.uuid4().hex}", uuid.uuid4().hex
+            claim_epoch = None
             claimed_intent = False
             heartbeat = None
             claim_lost = asyncio.Event()
@@ -62,21 +63,19 @@ class ToolExecutor:
                             self._idempotent_results[key] = result
                             return result
                     return ToolResult.failure(call, RuntimeError("intent is already claimed"))
+                claim_epoch = claimed.claim_epoch
                 claimed_intent = True
-                heartbeat = asyncio.create_task(self._claim_heartbeat(key, claim_owner, claim_token, claim_lost))
+                heartbeat = asyncio.create_task(self._claim_heartbeat(key, claim_owner, claim_token, claim_epoch, claim_lost))
             try:
                 operation_task = asyncio.create_task(self._execute_once(call, context, execution_context)) if claimed_intent else None
                 if operation_task is not None:
                     lost_task = asyncio.create_task(claim_lost.wait())
                     done, _ = await asyncio.wait({operation_task, lost_task}, return_when=asyncio.FIRST_COMPLETED)
                     if lost_task in done and operation_task not in done:
-                        operation_task.cancel()
-                        await asyncio.gather(operation_task, return_exceptions=True)
+                        operation_task.cancel(); await asyncio.gather(operation_task, return_exceptions=True)
                         result = ToolResult.failure(call, RuntimeError("tool intent claim was lost during execution"), retryable=False)
                     else:
-                        lost_task.cancel()
-                        await asyncio.gather(lost_task, return_exceptions=True)
-                        result = await operation_task
+                        lost_task.cancel(); await asyncio.gather(lost_task, return_exceptions=True); result = await operation_task
                 else:
                     result = await self._execute_once(call, context, execution_context)
                 if result.ok:
@@ -84,31 +83,29 @@ class ToolExecutor:
                         stored = self.idempotency_store.put_if_absent(StoredToolResult(key, call.call_id, call.tool, True, result.value))
                         result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
                     if self.intent_store:
-                        self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed")
+                        finalized = self.intent_store.mark_claimed(key, claim_owner, claim_token, "completed", claim_epoch=claim_epoch)
+                        if finalized is None:
+                            return ToolResult.failure(call, RuntimeError("tool intent claim changed before finalization"), retryable=False)
                     self._idempotent_results[key] = result
                 elif claimed_intent and self.intent_store:
-                    self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
+                    self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous", claim_epoch=claim_epoch)
                     result = ToolResult.failure(call, RuntimeError(result.error or "tool outcome is ambiguous"), retryable=False)
                 return result
             except asyncio.CancelledError:
-                if claimed_intent and self.intent_store: self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
+                if claimed_intent and self.intent_store: self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous", claim_epoch=claim_epoch)
                 raise
             finally:
                 if heartbeat:
-                    heartbeat.cancel()
-                    await asyncio.gather(heartbeat, return_exceptions=True)
+                    heartbeat.cancel(); await asyncio.gather(heartbeat, return_exceptions=True)
 
-    async def _claim_heartbeat(self, key, owner_id, claim_token, claim_lost):
-        ttl = max(1, getattr(self.intent_store, "claim_ttl_seconds", 60))
-        interval = max(0.25, ttl / 3)
+    async def _claim_heartbeat(self, key, owner_id, claim_token, claim_epoch, claim_lost):
+        ttl = max(1, getattr(self.intent_store, "claim_ttl_seconds", 60)); interval = max(0.25, ttl / 3)
         try:
             while True:
                 await asyncio.sleep(interval)
-                if not self.intent_store.renew_claim(key, owner_id, claim_token):
-                    claim_lost.set()
-                    return
-        except asyncio.CancelledError:
-            raise
+                if not self.intent_store.renew_claim(key, owner_id, claim_token, claim_epoch=claim_epoch):
+                    claim_lost.set(); return
+        except asyncio.CancelledError: raise
 
     async def reconcile_intent(self, intent: ToolIntent, resolver):
         """Resolve an ambiguous operation without replaying its side effect."""
