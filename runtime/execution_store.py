@@ -158,13 +158,7 @@ class ExecutionStore:
             return list(self._read_unlocked())
 
     def save(self, state, *, fencing_token=None, fencing_validator=None):
-        """Create or update using the state's observed version; never last-write-wins.
-
-        A new execution must use version 0. An existing execution must carry the
-        exact version read by the writer, turning the legacy unconditional save
-        into a CAS boundary. Optional fencing is evaluated inside the same file
-        lock immediately before the durable write.
-        """
+        """Create or update using the state's observed version; never last-write-wins."""
         if not isinstance(state, ExecutionState):
             raise TypeError("state must be an ExecutionState")
         return self._save(
@@ -223,13 +217,12 @@ class ExecutionStore:
             raise TypeError("state must be an ExecutionState")
         if not state.execution_id or not isinstance(state.execution_id, str):
             raise ValueError("execution_id must be a non-empty string")
+        if expected_version is None:
+            raise ValueError("expected_version is required at the persistence boundary")
 
         data = self._read_unlocked()
         previous = data.get(state.execution_id)
         current_version = self._version(previous)
-
-        if expected_version is None:
-            raise ValueError("expected_version is required at the persistence boundary")
         if current_version != expected_version:
             raise ExecutionVersionConflictError(
                 f"execution '{state.execution_id}' version changed"
@@ -255,10 +248,20 @@ class ExecutionStore:
             self.state_machine.validate(previous.get("status", "pending"), state.status)
 
         old_status = previous.get("status", "pending") if previous else None
-        state.version = current_version + 1
-        state.updated_at = datetime.now(timezone.utc).isoformat()
-        data[state.execution_id] = asdict(state)
+        persisted = ExecutionState(
+            **{
+                **asdict(state),
+                "version": current_version + 1,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        data[state.execution_id] = asdict(persisted)
+        # Do not mutate the caller's object until the durable rename succeeds.
+        # A failed disk write must leave the caller holding the same version it
+        # can safely retry, rather than manufacturing a false local revision.
         self._write(data)
+        for key, value in asdict(persisted).items():
+            setattr(state, key, value)
 
         if self.audit_log and old_status != state.status:
             self.audit_log.append(
