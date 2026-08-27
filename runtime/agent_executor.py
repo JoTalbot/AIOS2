@@ -9,14 +9,16 @@ from .execution_context import ExecutionContext
 from .execution_events import ExecutionEvent
 from .tool_executor import ToolExecutor
 from .tool_protocol import ToolCall, ToolResult
-from .tool_sandbox import ToolExecutionContext
+from .tool_sandbox import ToolExecutionContext, ToolSandbox
 
 
 class AgentExecutor:
     """Execute an agent plan through the typed, policy-aware tool boundary."""
 
     def __init__(self, tool_executor: ToolExecutor, memory: Optional[Any] = None, retries: int = 0, event_bus: Optional[EventBus] = None):
-        self.tool_executor = tool_executor
+        # Preserve the legacy AgentExecutor(ToolSandbox(...)) construction while
+        # keeping ToolExecutor as the canonical protocol adapter.
+        self.tool_executor = ToolExecutor(tool_executor) if isinstance(tool_executor, ToolSandbox) else tool_executor
         self.memory = memory
         self.retries = max(0, retries)
         self.event_bus = event_bus
