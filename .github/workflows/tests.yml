@@ -7,7 +7,7 @@ on:
 
 jobs:
   pytest:
-    runs-on: runnerhut-rh-f785129128dd
+    runs-on: runnerhut-linux-2vcpu-d03d2827
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
