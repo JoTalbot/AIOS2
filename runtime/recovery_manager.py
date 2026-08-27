@@ -10,9 +10,7 @@ from .execution_store import ExecutionStore
 class RecoveryManager:
     def __init__(self, store: ExecutionStore, commit_coordinator=None):
         self.store = store
-        self.commit_coordinator = commit_coordinator or ExecutionCommitCoordinator(
-            store, ExecutionAuditLog()
-        )
+        self.commit_coordinator = commit_coordinator or ExecutionCommitCoordinator(store, ExecutionAuditLog())
 
     def pending(self):
         return self.store.resumable()
@@ -23,20 +21,14 @@ class RecoveryManager:
             if hasattr(loop, "resume"):
                 result = await loop.resume(state.execution_id, agent, context=context)
             else:
-                result = await loop.run(
-                    state.goal or "",
-                    agent,
-                    context=context,
-                    execution_context=getattr(state, "execution_context", None),
-                )
+                result = await loop.run(state.goal or "", agent, context=context, execution_context=getattr(state, "execution_context", None))
             recovered.append((state.execution_id, result))
         return recovered
 
     def mark_failed(self, state, error: BaseException):
-        """Persist recovery failure through the canonical lifecycle boundary."""
-        return self.commit_coordinator.commit(
-            state,
-            "failed",
-            reason=str(error),
-            updates={"error": str(error)},
-        )
+        """Persist recovery failure through the canonical lifecycle boundary and return state."""
+        self.commit_coordinator.commit(state, "failed", reason=str(error), updates={"error": str(error)})
+        updated = self.store.get(state.execution_id)
+        if updated is None:
+            raise RuntimeError(f"execution {state.execution_id} disappeared during recovery failure handling")
+        return updated
