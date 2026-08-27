@@ -83,12 +83,12 @@ class ToolIntentStore:
             if not expiry or datetime.fromisoformat(expiry)<=datetime.now(timezone.utc):return None
             raw["state"],raw["owner_id"],raw["claim_token"],raw["claim_expires_at"]=state,None,None,None; self._write(data); return ToolIntent(**raw)
     def mark(self,key,state):
-        if state not in {"completed","failed"}: raise ValueError("mark requires a terminal state")
+        if state not in AMBIGUOUS_STATES | {"completed","failed"}: raise ValueError("invalid intent state")
         with _IntentLock(self.lock_path):
             data=self._read(); raw=data.get(key)
             if raw is None:return None
             if raw.get("owner_id") is not None:return None
-            if raw.get("state") in {"completed","failed"}: return ToolIntent(**raw)
+            if state in {"completed","failed"} and raw.get("state") in {"completed","failed"}: return ToolIntent(**raw)
             raw["state"]=state; self._write(data); return ToolIntent(**raw)
     def pending(self):
         with _IntentLock(self.lock_path):return [ToolIntent(**raw) for raw in self._read().values() if raw.get("state") in AMBIGUOUS_STATES]
