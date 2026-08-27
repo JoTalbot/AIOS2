@@ -18,32 +18,38 @@ def test_multi_worker_commit_reconcile_and_lease_rotation_has_bounded_single_out
     barrier = threading.Barrier(3)
     results = []
     errors = []
+    results_lock = threading.Lock()
+
+    def record(value):
+        with results_lock:
+            results.append(value)
 
     def arrive():
         try:
             barrier.wait(timeout=3)
             return True
         except threading.BrokenBarrierError as exc:
-            errors.append(exc)
+            with results_lock:
+                errors.append(exc)
             return False
 
     def commit_worker():
         if not arrive(): return
-        try: results.append(("commit", coordinator.commit(state, "completed", checkpoint={"ok": True}).commit_id))
-        except Exception as exc: results.append(("commit-error", type(exc).__name__))
+        try: record(("commit", coordinator.commit(state, "completed", checkpoint={"ok": True}).commit_id))
+        except Exception as exc: record(("commit-error", type(exc).__name__))
 
     def reconcile_worker():
         if not arrive(): return
-        try: results.append(("reconcile", tuple(coordinator.reconcile())))
-        except Exception as exc: results.append(("reconcile-error", type(exc).__name__))
+        try: record(("reconcile", tuple(coordinator.reconcile())))
+        except Exception as exc: record(("reconcile-error", type(exc).__name__))
 
     def rotation_worker():
         if not arrive(): return
         try:
             released = leases.release("e1", "node-a", lease.fencing_token)
             rotated = leases.acquire("e1", "node-b") if released else None
-            results.append(("rotation", rotated.fencing_token if rotated else None))
-        except Exception as exc: results.append(("rotation-error", type(exc).__name__))
+            record(("rotation", rotated.fencing_token if rotated else None))
+        except Exception as exc: record(("rotation-error", type(exc).__name__))
 
     threads = [
         threading.Thread(target=commit_worker, name="commit-worker", daemon=True),
