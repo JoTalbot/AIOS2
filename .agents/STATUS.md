@@ -2,32 +2,36 @@
 
 ## Current phase
 - Phase: production hardening of the vNext execution/recovery path
-- Branch: `batch/25-journal-read-coordination`
-- Base: `main` at `42674320f157b49133aa38542e40a50b3e6a94f9`
+- Branch: `batch/26-quarantine-coordination`
+- Base: `main` after Batch 25 merge (`2722bd30631eca1014915082b602bed76ffcbb93`)
 - Active PR: pending creation
 
 ## Current architecture
 - Runtime owns execution identity, persistence, checkpoints, recovery, leases, fencing and audit.
 - Cognition is an ephemeral decision boundary over the canonical `ExecutionContext`.
 - Execution persistence and lease coordination use one execution-scoped coordination lock when configured.
-- Commit journal writes and reads use a dedicated journal lock.
+- Commit journal writes, reads, and corruption quarantine are serialized by the dedicated journal lock boundary.
 
-## Batch 25 — Journal read coordination
-- Added `_read_journal_unlocked()` as the internal parser/repair primitive.
-- Wrapped public journal reads in `_JournalLock` so readers cannot observe a concurrent append/mark operation mid-write.
-- Updated `_mark()` to call the unlocked reader while already holding the journal lock, removing reliance on nested lock acquisition.
-- Added regression coverage proving `pending()` uses the journal lock.
+## Batch 25 — Completed
+- Coordinated public journal reads with `_JournalLock`.
+- Added `_read_journal_unlocked()` for callers already holding the journal lock.
+- Removed nested journal-lock acquisition from `_mark()`.
+- CI and recovery RBAC security checks passed; PR #85 merged successfully.
+
+## Batch 26 — Quarantine coordination
+- Added regression coverage proving malformed journal data is quarantined while the journal lock is held.
+- Added top-level operational documentation: `README.md`, `ARCHITECTURE.md`, `TESTING.md`, `ROADMAP.md`, `TASKS.md`, `CHANGELOG.md`.
 
 ## Validation
-- Focused regression test added in `tests/test_execution_commit_faults.py`.
-- Full CI and security validation will run through GitHub Actions after PR creation.
+- Batch 25 CI run #224: tests ✅, security ✅, runner-check ✅.
+- Batch 26 focused test is committed; full validation will run through GitHub Actions on PR creation.
 
 ## Next actions
-1. Open PR for Batch 25.
+1. Open PR for Batch 26.
 2. Wait for full CI and security checks.
-3. Fix failures on this owning branch only.
-4. Merge only after CI is green.
-5. Continue with concurrent corruption/quarantine behavior and then operational documentation debt.
+3. Merge only after CI is green.
+4. Audit journal sequence recovery, audit-log durability, execution-store atomicity, and lease/fencing edge cases.
+5. Continue autonomous hardening.
 
 ## Rules
 GitHub is the source of truth. Every significant step updates this file. Do not force-push shared branches.
