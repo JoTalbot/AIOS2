@@ -10,6 +10,7 @@ from .execution_events import ExecutionEvent
 from .tool_executor import ToolExecutor
 from .tool_protocol import ToolCall, ToolResult
 from .tool_sandbox import ToolExecutionContext, ToolSandbox
+from .tool_registry import ToolPermissionError
 
 
 class AgentExecutor:
@@ -39,7 +40,10 @@ class AgentExecutor:
                     results.append(step)
                     continue
                 call = ToolCall(tool=tool, arguments=dict(step.get("arguments") or step.get("kwargs") or {}), call_id=str(step.get("call_id") or f"{agent_id}:{index}"), timeout=step.get("timeout"), idempotency_key=step.get("idempotency_key") or f"{ctx.execution_id}:{step.get('call_id') or index}")
-                result = await self._execute_with_retry(call, agent_id, permissions, ctx)
+                try:
+                    result = await self._execute_with_retry(call, agent_id, permissions, ctx)
+                except ToolPermissionError as exc:
+                    result = ToolResult.failure(call, exc, retryable=False)
                 results.append(result.value if self._legacy_sandbox else result)
                 if self.memory and hasattr(self.memory, "remember"):
                     self.memory.remember({"execution_id": ctx.execution_id, "agent_id": agent_id, "tool": tool, "call_id": call.call_id, "ok": result.ok, "result": result.value, "error": result.error})
