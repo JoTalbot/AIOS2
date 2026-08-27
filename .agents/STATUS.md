@@ -3,7 +3,8 @@
 ## Current phase
 - Phase: isolated new architecture hardening and integration
 - Branch: `main`
-- Latest integrated commit: `93bb731102d39e2c1ea79a23e710761ecda5983d`
+- Latest integrated commit: `19defd0e810afc4c2568de46f82928f6937f1d38`
+- Active work branch: `batch7G/pytest-baseline-hardening`
 
 ## Active agents
 
@@ -20,7 +21,7 @@
 | batch7/lease-sync | Multi-process lease synchronization | merged via PR #23 | completed |
 | batch7/observability | Structured recovery outcome | merged via PR #24 | completed |
 | batch7E/recovery-outcome-rebased | Harden stable recovery outcome contract | superseded by direct main hardening | completed |
-| batch7C-7F | Readiness/bootstrap/renewal/recovery HTTP | next | planned |
+| batch7G/pytest-baseline-hardening | Full-suite baseline and execution-boundary compatibility | active | in progress |
 
 ## Completed
 - Hardened execution state-machine validation and unknown-state handling.
@@ -32,27 +33,23 @@
 - Integrated optional per-execution leases into recovery with safe release on success/failure.
 - Hardened lease-aware checkpoint contracts for execution identity, attempt number and failure error.
 - Added multi-process synchronization for file-backed execution leases.
-- Added structured recovery outcome contract and then hardened its API boundary validation.
+- Added structured recovery outcome contract and hardened its API boundary validation.
 - Added regression coverage for empty execution IDs, unsupported statuses and stable serialization.
 - Added a repository-wide pytest GitHub Actions workflow (`.github/workflows/tests.yml`).
-
-## Current architecture work
-- vNext orchestration/execution path.
-- Agent → Tool Registry → Permission Boundary → Tool Executor.
-- Persistence, checkpoint, recovery, leases and audit contracts.
-- CI has a full pytest workflow in addition to the security regression workflow.
+- Fixed typed `ToolCall` argument forwarding in the registry execution boundary and added regression coverage.
 
 ## Validation
-- Recovery outcome boundary tests are committed on `main`.
-- PR #25 conflicted because `main` had already advanced through PR #24; its stronger validation was applied directly to `main` instead of rewriting history.
-- Next validation target is the repository-wide pytest workflow.
+- Security workflow for main commit `19defd0e810afc4c2568de46f82928f6937f1d38` is passing.
+- Repository-wide pytest workflow for that commit is currently failing: 17 failed, 87 passed.
+- The failures are a mixture of stale pre-hardening expectations and remaining compatibility/integration defects; they are now the primary baseline for batch remediation.
+- Active branch contains the first execution-boundary compatibility fix and its regression test.
 
 ## Next actions
-1. Establish the full pytest baseline and fix failures in batches.
-2. Audit recovery HTTP and runtime bootstrap paths for fail-closed/contract-hardening gaps.
-3. Audit lease renewal/release for stale-owner behavior and monotonic ownership semantics.
+1. Push the active branch and run its full pytest workflow.
+2. Remediate remaining genuine integration defects without weakening lease, permission, CAS, or recovery fencing guarantees.
+3. Update stale tests to the stabilized recovery outcome and lease-aware contracts where the API intentionally changed.
 4. Continue with atomic execution version + fencing CAS and crash-consistency fault injection.
-5. Continue parallel development through isolated branches/PRs and update this status after each significant batch.
+5. Audit recovery HTTP/runtime bootstrap and lease renewal/release for fail-closed stale-owner behavior.
 
 ## Rules
 Every agent updates this file before and after significant work. GitHub is the source of truth; do not rely on local chat history.
