@@ -66,6 +66,8 @@ class ExecutionStore:
         if not raw:return None
         value=dict(raw);value["result"]=self._decode_value(value.get("result"));return ExecutionState(**value)
     def _get_unlocked(self,execution_id): return self._decode_state(self._read_unlocked().get(execution_id))
+    def execution_ids(self):
+        with _FileLock(self.lock_path): return list(self._read_unlocked())
     def save(self,state):return self._save(state,None,validate_transition=False)
     def compare_and_set(self,state,expected_version,*,expected_status=None,fencing_token=None,fencing_validator=None,lock_held=False):
         if not isinstance(expected_version,int) or expected_version<0:raise ValueError("expected_version must be a non-negative integer")
