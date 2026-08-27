@@ -61,20 +61,17 @@ class ExecutionCommitCoordinator:
         if not self.lease_owner_id or self.fencing_token is None:return False
         checker=getattr(self.lease_store,"is_owner_unlocked",None)
         return checker(execution_id,self.lease_owner_id,self.fencing_token) if checker else self.lease_store.is_owner(execution_id,self.lease_owner_id,self.fencing_token)
-    def _lease_valid(self,execution_id):
-        return self._lease_valid_unlocked(execution_id)
     def _fencing_validator(self,execution_id,token):return token==self.fencing_token and self._lease_valid_unlocked(execution_id)
-    def _next_state(self, state, status, checkpoint=None, reason=None):
-        return ExecutionState(**{**asdict(state),"status":status,"result":checkpoint if status=="completed" else state.result,"error":reason if status=="failed" else state.error})
+    def _next_state(self,state,status,checkpoint=None,reason=None):return ExecutionState(**{**asdict(state),"status":status,"result":checkpoint if status=="completed" else state.result,"error":reason if status=="failed" else state.error})
     def commit(self,state,to_status,*,checkpoint=None,reason=None):
         commit_id=f"{state.execution_id}:{state.attempt}:{to_status}:{state.correlation_id or ''}"
         existing={c.commit_id:c for c in self.pending(all_statuses=True)}.get(commit_id)
         if existing:return existing
         commit=self._append_journal(ExecutionCommit(commit_id,state.execution_id,state.status,to_status,state.attempt,checkpoint,reason,correlation_id=state.correlation_id))
         with self.store.execution_lock():
-            current=self.store.get(state.execution_id) or state
-            if not self._lease_valid_unlocked(current.execution_id):return commit
-            try:self.store.compare_and_set(self._next_state(current,to_status,checkpoint,reason),current.version,expected_status=current.status,fencing_token=self.fencing_token,fencing_validator=self._fencing_validator)
+            current=self.store._get_unlocked(state.execution_id) if hasattr(self.store,"_get_unlocked") else self.store.get(state.execution_id)
+            if not current or not self._lease_valid_unlocked(current.execution_id):return commit
+            try:self.store.compare_and_set(self._next_state(current,to_status,checkpoint,reason),current.version,expected_status=current.status,fencing_token=self.fencing_token,fencing_validator=self._fencing_validator,lock_held=True)
             except (ExecutionFencingConflictError,ExecutionVersionConflictError,PermissionError):return commit
             self.audit_log.append(ExecutionAuditEvent(current.execution_id,current.status,to_status,current.attempt,reason,correlation_id=current.correlation_id,event_id=commit_id));self._mark(commit_id,"applied")
         return commit
@@ -90,12 +87,12 @@ class ExecutionCommitCoordinator:
         repaired=[]
         for commit in self.pending():
             with self.store.execution_lock():
-                state=self.store.get(commit.execution_id)
+                state=self.store._get_unlocked(commit.execution_id) if hasattr(self.store,"_get_unlocked") else self.store.get(commit.execution_id)
                 if not state or not self._lease_valid_unlocked(commit.execution_id):continue
                 if state.status==commit.to_status:
                     self.audit_log.append(ExecutionAuditEvent(commit.execution_id,commit.from_status,commit.to_status,commit.attempt,commit.reason,correlation_id=commit.correlation_id,event_id=commit.commit_id));self._mark(commit.commit_id,"reconciled");repaired.append(commit.commit_id);continue
                 if state.status!=commit.from_status:continue
-                try:self.store.compare_and_set(self._next_state(state,commit.to_status,commit.checkpoint,commit.reason),state.version,expected_status=commit.from_status,fencing_token=self.fencing_token,fencing_validator=self._fencing_validator)
+                try:self.store.compare_and_set(self._next_state(state,commit.to_status,commit.checkpoint,commit.reason),state.version,expected_status=commit.from_status,fencing_token=self.fencing_token,fencing_validator=self._fencing_validator,lock_held=True)
                 except (ExecutionFencingConflictError,ExecutionVersionConflictError,PermissionError):continue
                 self.audit_log.append(ExecutionAuditEvent(commit.execution_id,commit.from_status,commit.to_status,commit.attempt,commit.reason,correlation_id=commit.correlation_id,event_id=commit.commit_id));self._mark(commit.commit_id,"reconciled");repaired.append(commit.commit_id)
         return repaired
