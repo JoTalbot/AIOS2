@@ -6,7 +6,7 @@ from runtime.lease_aware_checkpoint import LeaseAwareCheckpoint
 from runtime.recovery_checkpoint import RecoveryCheckpoint
 
 
-class TestCheckpoint(RecoveryCheckpoint):
+class _TestCheckpoint(RecoveryCheckpoint):
     pass
 
 
