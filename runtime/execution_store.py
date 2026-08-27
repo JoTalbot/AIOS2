@@ -83,13 +83,19 @@ class ExecutionStore:
         if self.audit_log and old_status!=state.status: self.audit_log.append(ExecutionAuditEvent(state.execution_id,old_status or "new",state.status,state.attempt,state.error,correlation_id=state.correlation_id))
         return state
     def transition(self,execution_id,status,**updates):
+        """Apply a transition against the version observed by this caller.
+
+        Unlike an unconditional save, this prevents a stale transition from
+        silently overwriting a newer execution state written by another worker.
+        """
         state=self.get(execution_id)
         if not state:
             if status!="pending": raise KeyError(execution_id)
             state=ExecutionState(execution_id=execution_id)
+        expected_version=state.version
         state.status=status
         for key,value in updates.items(): setattr(state,key,value)
-        return self.save(state)
+        return self.compare_and_set(state, expected_version)
     def get(self,execution_id):
         with _FileLock(self.lock_path): raw=self._read_unlocked().get(execution_id)
         return ExecutionState(**raw) if raw else None
