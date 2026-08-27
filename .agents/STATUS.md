@@ -2,9 +2,9 @@
 
 ## Current phase
 - Phase: isolated new architecture hardening and integration
-- Branch: `batch/lease-renewal-fencing`
-- Latest integrated commit: `19defd0e810afc4c2568de46f82928f6937f1d38`
-- Active work commit: `885b32ee0374c7af7938e5ce9b515238f5fc06a4`
+- Branch: `batch/recovery-http-hardening`
+- Latest integrated commit on `main`: `ec5ac30764bfa54ef66ac639f0c26ce369ce3f22`
+- Active work commit: `8626a2ae5ef1855373edd365e8055c4f69be7981`
 
 ## Active agents
 
@@ -20,8 +20,9 @@
 | batch/checkpoint-contracts | Lease-aware checkpoint input contracts | merged via PR #14 | completed |
 | batch7/lease-sync | Multi-process lease synchronization | merged via PR #23 | completed |
 | batch7/observability | Structured recovery outcome | merged via PR #24 | completed |
-| batch7E/recovery-outcome-rebased | Harden stable recovery outcome contract | superseded by direct main hardening | completed |
-| batch/lease-renewal-fencing | Stale-owner lease renewal and bootstrap failure fencing | current branch | completed, awaiting fresh CI |
+| batch/lease-renewal-fencing | Stale-owner lease renewal and bootstrap failure fencing | merged via PR #38 | completed |
+| batch/atomic-cas-crash-hardening | Atomic execution CAS durability and recovery isolation | merged via PR #39 | completed |
+| batch/recovery-http-hardening | Recovery HTTP contract validation and centralized mutation RBAC | current branch | active |
 
 ## Completed
 - Hardened execution state-machine validation and unknown-state handling.
@@ -33,31 +34,32 @@
 - Integrated optional per-execution leases into recovery with safe release on success/failure.
 - Hardened lease-aware checkpoint contracts for execution identity, attempt number and failure error.
 - Added multi-process synchronization for file-backed execution leases.
-- Added structured recovery outcome contract and then hardened its API boundary validation.
+- Added structured recovery outcome contract and hardened its API boundary validation.
 - Added a repository-wide pytest GitHub Actions workflow (`.github/workflows/tests.yml`).
 - Added fencing-token validation to lease renewal while preserving the existing owner-only renewal API.
 - Updated runtime bootstrap heartbeat to renew with its fencing token.
 - Updated bootstrap recovery failure persistence to pass the active lease to `RecoveryManager.mark_failed`, preventing stale workers from committing terminal failure state.
 - Added regression coverage for stale renewal using a re-acquired lease with the same owner ID.
 - Restored `ExecutionContext` compatibility export through `runtime.execution_store`.
+- Added optimistic execution-state CAS and atomic persistence hardening in the latest integrated batch.
 
 ## Current architecture work
 - vNext orchestration/execution path.
 - Agent → Tool Registry → Permission Boundary → Tool Executor.
 - Persistence, checkpoint, recovery, leases and audit contracts.
 - CI has a full pytest workflow in addition to the security regression workflow.
+- Recovery HTTP transport now validates supported actions at the request boundary and uses one centralized operator-role guard for mutations.
 
 ## Validation
-- Code and regression test changes are committed on `batch/lease-renewal-fencing`.
-- The previous pytest run used the PR merge-ref before the latest head commit and failed during collection on the now-restored `ExecutionContext` export.
-- Fresh CI must validate the current branch head before merge.
+- Recovery HTTP hardening implementation and focused regression tests are committed on `batch/recovery-http-hardening`.
+- The branch is based directly on current `main` after PR #39 integration.
+- GitHub Actions remains the authoritative full-suite validation path; local execution is not available through the GitHub connector.
 
 ## Next actions
-1. Validate fresh repository-wide pytest CI for the current branch head.
-2. Audit recovery HTTP and runtime bootstrap paths for remaining fail-closed/contract-hardening gaps in parallel.
-3. Continue atomic execution version + fencing CAS and crash-consistency fault injection in parallel with CI.
-4. Merge the isolated branch only after required CI is green.
-5. Update status on `main` after integration.
+1. Open a PR for `batch/recovery-http-hardening` and validate its CI.
+2. Audit runtime bootstrap/recovery exception mapping for remaining fail-closed gaps.
+3. Continue crash-consistency fault injection around execution CAS + commit journal ordering.
+4. Merge only after required CI is green, then update this status on `main`.
 
 ## Rules
 Every agent updates this file before and after significant work. GitHub is the source of truth; do not rely on local chat history.
