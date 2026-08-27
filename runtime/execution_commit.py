@@ -75,16 +75,14 @@ class ExecutionCommitCoordinator:
             if not line.strip():
                 continue
             try:
-                raw = json.loads(line)
+                sequence = json.loads(line).get("sequence")
             except json.JSONDecodeError:
                 continue
-            sequence = raw.get("sequence")
             if isinstance(sequence, int):
                 maximum = max(maximum, sequence)
         return maximum
 
     def _append_journal_unlocked(self, commit: ExecutionCommit):
-        self._read_journal_unlocked()
         next_sequence = self._max_sequence_unlocked() + 1
         commit = ExecutionCommit(**{**asdict(commit), "sequence": next_sequence}).with_integrity()
         with self.journal_path.open("a", encoding="utf-8") as handle:
@@ -126,42 +124,35 @@ class ExecutionCommitCoordinator:
             handle.write(json.dumps({"reason": reason, "line": line, "quarantined_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False) + "\n")
 
     def commit(self, state: ExecutionState, to_status: str, *, checkpoint=None, reason=None, updates=None, fencing_token: Optional[int] = None):
-        """Commit one validated lifecycle transition using optimistic CAS."""
+        """Commit one validated lifecycle transition using optimistic CAS.
+
+        The journal record is the durable intent. If the store transition wins,
+        the record is marked applied. Repeating an already-applied transition
+        returns the original journal record instead of manufacturing a second
+        commit id.
+        """
         current = self.store.get(state.execution_id) or state
         updates = dict(updates or {})
         if to_status == "completed" and checkpoint is not None:
             updates.setdefault("result", checkpoint)
         if to_status == "failed" and reason is not None:
             updates.setdefault("error", reason)
-        expected_version = current.version
         effective_fence = fencing_token if fencing_token is not None else current.fencing_token
-        commit_id = f"{current.execution_id}:{current.attempt}:{current.status}:{to_status}:{expected_version}:{effective_fence}:{current.correlation_id or ''}"
         with self._lock():
-            existing = {c.commit_id: c for c in self._read_journal_unlocked() if c.commit_id == commit_id}
-            if existing:
-                return next(iter(existing.values()))
-            commit = self._append_journal_unlocked(
-                ExecutionCommit(
-                    commit_id,
-                    current.execution_id,
-                    current.status,
-                    to_status,
-                    current.attempt,
-                    checkpoint,
-                    reason,
-                    correlation_id=current.correlation_id,
-                    expected_version=expected_version,
-                    fencing_token=effective_fence,
-                )
-            )
-            self.store.transition(
-                current.execution_id,
-                to_status,
-                _audit=False,
-                expected_version=expected_version,
-                fencing_token=effective_fence,
-                **updates,
-            )
+            commits = self._read_journal_unlocked()
+            # Idempotent retry after the canonical store already applied the
+            # transition: return the exact original durable commit.
+            if current.status == to_status and current.version > 0:
+                for existing in reversed(commits):
+                    if existing.execution_id == current.execution_id and existing.to_status == to_status and existing.expected_version == current.version - 1 and existing.fencing_token == effective_fence:
+                        return existing
+            expected_version = current.version
+            commit_id = f"{current.execution_id}:{current.attempt}:{current.status}:{to_status}:{expected_version}:{effective_fence}:{current.correlation_id or ''}"
+            for existing in commits:
+                if existing.commit_id == commit_id:
+                    return existing
+            commit = self._append_journal_unlocked(ExecutionCommit(commit_id, current.execution_id, current.status, to_status, current.attempt, checkpoint, reason, correlation_id=current.correlation_id, expected_version=expected_version, fencing_token=effective_fence))
+            self.store.transition(current.execution_id, to_status, _audit=False, expected_version=expected_version, fencing_token=effective_fence, **updates)
             self.audit_log.append(ExecutionAuditEvent(current.execution_id, current.status, to_status, current.attempt, reason, correlation_id=current.correlation_id, event_id=commit_id))
             self._mark_unlocked(commit_id, "applied")
             return commit
