@@ -2,8 +2,9 @@
 
 ## Current phase
 - Phase: isolated new architecture hardening and integration
-- Branch: `main`
-- Latest integrated commit: `93bb731102d39e2c1ea79a23e710761ecda5983d`
+- Branch: `batch/lease-renewal-fencing`
+- Latest integrated commit: `19defd0e810afc4c2568de46f82928f6937f1d38`
+- Active work commit: `79befaafdf3ec51167d71cf770a61bd603f54a5f`
 
 ## Active agents
 
@@ -20,7 +21,7 @@
 | batch7/lease-sync | Multi-process lease synchronization | merged via PR #23 | completed |
 | batch7/observability | Structured recovery outcome | merged via PR #24 | completed |
 | batch7E/recovery-outcome-rebased | Harden stable recovery outcome contract | superseded by direct main hardening | completed |
-| batch7C-7F | Readiness/bootstrap/renewal/recovery HTTP | next | planned |
+| batch/lease-renewal-fencing | Stale-owner lease renewal and bootstrap failure fencing | current branch | completed, awaiting CI |
 
 ## Completed
 - Hardened execution state-machine validation and unknown-state handling.
@@ -33,8 +34,11 @@
 - Hardened lease-aware checkpoint contracts for execution identity, attempt number and failure error.
 - Added multi-process synchronization for file-backed execution leases.
 - Added structured recovery outcome contract and then hardened its API boundary validation.
-- Added regression coverage for empty execution IDs, unsupported statuses and stable serialization.
 - Added a repository-wide pytest GitHub Actions workflow (`.github/workflows/tests.yml`).
+- Added fencing-token validation to lease renewal while preserving the existing owner-only renewal API.
+- Updated runtime bootstrap heartbeat to renew with its fencing token.
+- Updated bootstrap recovery failure persistence to pass the active lease to `RecoveryManager.mark_failed`, preventing stale workers from committing terminal failure state.
+- Added regression coverage for stale renewal using a re-acquired lease with the same owner ID.
 
 ## Current architecture work
 - vNext orchestration/execution path.
@@ -43,16 +47,15 @@
 - CI has a full pytest workflow in addition to the security regression workflow.
 
 ## Validation
-- Recovery outcome boundary tests are committed on `main`.
-- PR #25 conflicted because `main` had already advanced through PR #24; its stronger validation was applied directly to `main` instead of rewriting history.
-- Next validation target is the repository-wide pytest workflow.
+- Code and regression test changes are committed on `batch/lease-renewal-fencing`.
+- Local test execution is not available through the GitHub connector; the repository pytest workflow is the validation target after push/PR.
 
 ## Next actions
-1. Establish the full pytest baseline and fix failures in batches.
-2. Audit recovery HTTP and runtime bootstrap paths for fail-closed/contract-hardening gaps.
-3. Audit lease renewal/release for stale-owner behavior and monotonic ownership semantics.
-4. Continue with atomic execution version + fencing CAS and crash-consistency fault injection.
-5. Continue parallel development through isolated branches/PRs and update this status after each significant batch.
+1. Run/inspect repository-wide pytest CI for `batch/lease-renewal-fencing`.
+2. Audit recovery HTTP and runtime bootstrap paths for remaining fail-closed/contract-hardening gaps.
+3. Continue with atomic execution version + fencing CAS and crash-consistency fault injection.
+4. Open/merge the isolated branch after CI passes.
+5. Update status on `main` after integration.
 
 ## Rules
 Every agent updates this file before and after significant work. GitHub is the source of truth; do not rely on local chat history.
