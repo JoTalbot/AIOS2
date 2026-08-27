@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json, os
 from pathlib import Path
-from typing import Optional
 try: import fcntl
 except ImportError: fcntl=None
 @dataclass(frozen=True)
@@ -53,9 +52,11 @@ class ExecutionLeaseStore:
             now=datetime.now(timezone.utc); data=self._read(); current=data.get(execution_id)
             if not current or current["owner_id"]!=owner_id or (fencing_token is not None and current["fencing_token"]!=fencing_token) or datetime.fromisoformat(current["expires_at"])<=now:return None
             return self._store(execution_id,owner_id,data,now,int(current["fencing_token"]))
+    def is_owner_unlocked(self,execution_id,owner_id,fencing_token=None):
+        current=self._read().get(execution_id)
+        return bool(current and current["owner_id"]==owner_id and (fencing_token is None or current["fencing_token"]==fencing_token) and datetime.fromisoformat(current["expires_at"])>datetime.now(timezone.utc))
     def is_owner(self,execution_id,owner_id,fencing_token=None):
-        with self.execution_lock():
-            current=self._read().get(execution_id); return bool(current and current["owner_id"]==owner_id and (fencing_token is None or current["fencing_token"]==fencing_token) and datetime.fromisoformat(current["expires_at"])>datetime.now(timezone.utc))
+        with self.execution_lock():return self.is_owner_unlocked(execution_id,owner_id,fencing_token)
     def _store(self,execution_id,owner_id,data,now,fencing_token):
         lease=ExecutionLease(execution_id,owner_id,(now+timedelta(seconds=self.ttl_seconds)).isoformat(),fencing_token); data[execution_id]=lease.__dict__; self._write(data); return lease
     def release(self,execution_id,owner_id,fencing_token=None):
