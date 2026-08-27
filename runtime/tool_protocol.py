@@ -10,6 +10,7 @@ class ToolCall:
     arguments: Dict[str, Any] = field(default_factory=dict)
     call_id: str = ""
     timeout: Optional[float] = None
+    idempotency_key: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -20,11 +21,12 @@ class ToolResult:
     value: Any = None
     error: Optional[str] = None
     retryable: bool = False
+    idempotency_key: Optional[str] = None
 
     @classmethod
     def success(cls, call: ToolCall, value: Any):
-        return cls(call.call_id, call.tool, True, value=value)
+        return cls(call.call_id, call.tool, True, value=value, idempotency_key=call.idempotency_key)
 
     @classmethod
     def failure(cls, call: ToolCall, error: BaseException, *, retryable: bool = False):
-        return cls(call.call_id, call.tool, False, error=str(error), retryable=retryable)
+        return cls(call.call_id, call.tool, False, error=str(error), retryable=retryable, idempotency_key=call.idempotency_key)
