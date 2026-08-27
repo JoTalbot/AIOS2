@@ -28,7 +28,7 @@ class IntentRecoveryWorker:
         lease = self.lease_store.acquire(lease_key, self.owner_id)
         if lease is None:
             return IntentRecoveryResult(intent.idempotency_key, "skipped_by_lease")
-        claim_token = uuid4().hex
+        claim_token = f"recovery:{self.owner_id}:{lease.fencing_token}:{uuid4().hex}"
         claimed = self.store.claim(intent.idempotency_key, self.owner_id, claim_token)
         if claimed is None:
             self.lease_store.release(lease_key, self.owner_id, lease.fencing_token)
