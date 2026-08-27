@@ -10,6 +10,7 @@ class ToolCall:
     arguments: Dict[str, Any] = field(default_factory=dict)
     call_id: str = ""
     timeout: Optional[float] = None
+    idempotency_key: Optional[str] = None
 
 
 @dataclass(frozen=True)
