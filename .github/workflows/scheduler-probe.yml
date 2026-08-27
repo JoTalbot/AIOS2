@@ -1,0 +1,42 @@
+name: scheduler-probe
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: dependency-free runner probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record allocation heartbeat
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p scheduler-diagnostics
+          {
+            echo "event=${GITHUB_EVENT_NAME}"
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "run_attempt=${GITHUB_RUN_ATTEMPT}"
+            echo "workflow=${GITHUB_WORKFLOW}"
+            echo "ref=${GITHUB_REF}"
+            echo "sha=${GITHUB_SHA}"
+            echo "runner=${RUNNER_NAME}"
+            echo "os=${RUNNER_OS}"
+            echo "arch=${RUNNER_ARCH}"
+            echo "allocation_heartbeat=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } | tee scheduler-diagnostics/heartbeat.txt
+          uname -a | tee scheduler-diagnostics/uname.txt
+          printf 'probe=ok\n' | tee scheduler-diagnostics/probe.txt
+      - name: Upload scheduler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduler-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: scheduler-diagnostics/
+          if-no-files-found: warn
