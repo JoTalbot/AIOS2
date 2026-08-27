@@ -5,6 +5,8 @@ from typing import Any, Optional
 
 from .execution_context import ExecutionContext
 from .execution_store import ExecutionState, ExecutionStore
+from .execution_audit import ExecutionAuditLog
+from .execution_commit import ExecutionCommitCoordinator
 from .event_types import REPLAN_COMPLETED, REPLAN_REQUESTED
 from .execution_events import ExecutionEvent
 from .replanning import ReplanningPolicy
@@ -29,7 +31,10 @@ class AutonomousExecutionLoop:
         self.event_bus = event_bus
         self.store = store
         if store is not None and checkpoint is None:
-            raise ValueError("persistent execution requires a canonical checkpoint/commit coordinator")
+            audit_path = str(store.path.with_name("execution_audit.jsonl"))
+            audit = ExecutionAuditLog(audit_path)
+            coordinator = ExecutionCommitCoordinator(store, audit, str(store.path.with_name("execution_commits.jsonl")))
+            checkpoint = RecoveryCheckpoint(store, coordinator)
         self.checkpoint = checkpoint
 
     async def run(self, goal: str, agent: Any, context: Optional[dict] = None, execution_context: Optional[ExecutionContext] = None):
@@ -52,15 +57,11 @@ class AutonomousExecutionLoop:
         if state is None:
             state = ExecutionState(execution.execution_id, status="pending", goal=goal, attempt=start_attempt, plan=plan)
             if self.store:
-                # Initial materialization is persistence, not a lifecycle transition.
                 self.store.save(state)
-
         elif state.status not in {"running", "retrying", "pending"}:
             raise ValueError(f"execution '{state.execution_id}' cannot run from '{state.status}'")
-
         if state.status in {"pending", "retrying"}:
             state = self._checkpoint_running(state, start_attempt, plan)
-
         for attempt in range(start_attempt, self.policy.max_attempts):
             if state.attempt != attempt or state.plan != plan:
                 state = self._checkpoint_running(state, attempt, plan)
@@ -83,7 +84,7 @@ class AutonomousExecutionLoop:
 
     def _transition(self, state, status, **updates):
         if self.checkpoint:
-            return self.checkpoint.transition(state, status, **updates)
+            return self.checkpoint.transition(state, status, **updates) and self.store.get(state.execution_id)
         state.status = status
         for key, value in updates.items():
             setattr(state, key, value)
@@ -91,8 +92,8 @@ class AutonomousExecutionLoop:
 
     def _checkpoint_running(self, state, attempt, plan):
         if self.checkpoint:
-            result = self.checkpoint.mark_running(state, attempt, plan)
-            return self.store.get(state.execution_id) if self.store else result
+            self.checkpoint.mark_running(state, attempt, plan)
+            return self.store.get(state.execution_id) if self.store else state
         state.status, state.attempt, state.plan = "running", attempt, plan
         return state
 
