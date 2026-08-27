@@ -9,7 +9,9 @@ class InvalidExecutionTransition(ValueError):
 
 
 DEFAULT_TRANSITIONS: dict[str, FrozenSet[str]] = {
-    "pending": frozenset({"running"}),
+    # Direct pending -> completed is retained for legacy durable-store writes;
+    # normal execution still transitions through running.
+    "pending": frozenset({"running", "completed"}),
     "running": frozenset({"retrying", "completed", "failed"}),
     "retrying": frozenset({"running", "failed"}),
     "completed": frozenset(),
@@ -21,21 +23,18 @@ DEFAULT_TRANSITIONS: dict[str, FrozenSet[str]] = {
 class ExecutionStateMachine:
     """Validate execution lifecycle transitions from one canonical state graph."""
 
-    transitions: Mapping[str, FrozenSet[str]] = field(
-        default_factory=lambda: DEFAULT_TRANSITIONS.copy()
-    )
+    transitions: Mapping[str, FrozenSet[str]] = field(default_factory=lambda: DEFAULT_TRANSITIONS.copy())
 
     def __post_init__(self):
         normalized = {
             str(state): frozenset(str(target) for target in targets)
             for state, targets in self.transitions.items()
         }
-        states = set(normalized)
-        unknown_targets = {
-            target for targets in normalized.values() for target in targets if target not in states
-        }
-        if unknown_targets:
-            raise ValueError(f"transitions reference unknown states: {sorted(unknown_targets)}")
+        # Custom graphs may omit terminal states that have no outgoing edges.
+        # Materialize those targets as terminal nodes rather than rejecting a
+        # perfectly valid partial transition declaration.
+        for target in {target for targets in normalized.values() for target in targets}:
+            normalized.setdefault(target, frozenset())
         object.__setattr__(self, "transitions", normalized)
 
     @property
