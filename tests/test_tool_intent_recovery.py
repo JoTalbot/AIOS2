@@ -30,9 +30,7 @@ async def test_recovery_is_bounded_and_does_not_replay_side_effect(tmp_path):
     resolver = Resolver()
     worker = ToolIntentRecoveryWorker(store, max_attempts=3)
     executor = ToolExecutor(object(), intent_store=store)
-
     result = await worker.recover(executor, resolver)
-
     assert result[0].status == "quarantined"
     assert result[0].attempts == 3
     assert resolver.calls == 3
@@ -50,11 +48,9 @@ async def test_stale_recovery_worker_is_fenced(tmp_path):
     leases.release(intent.idempotency_key, "node-a", first.fencing_token)
     second = leases.acquire(intent.idempotency_key, "node-b")
     assert second is not None
-
     worker = ToolIntentRecoveryWorker(store, leases, "node-a")
     executor = ToolExecutor(object(), intent_store=store)
     result = await worker.recover(executor, Resolver())
-
     assert result[0].status == "skipped_by_lease"
 
 
@@ -68,12 +64,7 @@ async def test_concurrent_recovery_allows_only_one_claim_owner(tmp_path):
     worker_b = ToolIntentRecoveryWorker(store, owner_id="node-b")
     executor = ToolExecutor(object(), intent_store=store)
     resolver = Resolver(result=result, delay=0.02)
-
-    outcomes = await asyncio.gather(
-        worker_a.recover(executor, resolver),
-        worker_b.recover(executor, resolver),
-    )
-
+    outcomes = await asyncio.gather(worker_a.recover(executor, resolver), worker_b.recover(executor, resolver))
     statuses = {outcomes[0][0].status, outcomes[1][0].status}
     assert statuses == {"recovered", "skipped_by_claim"}
     assert resolver.calls == 1
@@ -91,12 +82,7 @@ async def test_concurrent_recovery_with_lease_allows_one_fencing_owner(tmp_path)
     worker_b = ToolIntentRecoveryWorker(store, leases, "node-b")
     executor = ToolExecutor(object(), intent_store=store)
     resolver = Resolver(result=result, delay=0.02)
-
-    outcomes = await asyncio.gather(
-        worker_a.recover(executor, resolver),
-        worker_b.recover(executor, resolver),
-    )
-
+    outcomes = await asyncio.gather(worker_a.recover(executor, resolver), worker_b.recover(executor, resolver))
     statuses = {outcomes[0][0].status, outcomes[1][0].status}
     assert statuses == {"recovered", "skipped_by_lease"}
     assert resolver.calls == 1
@@ -104,23 +90,22 @@ async def test_concurrent_recovery_with_lease_allows_one_fencing_owner(tmp_path)
 
 
 def test_recovery_claim_token_contains_lease_fencing_epoch(tmp_path):
-    import asyncio
-    from runtime.execution_lease import ExecutionLeaseStore
-    from runtime.tool_intent_store import ToolIntent, ToolIntentStore
-    from runtime.intent_recovery_worker import IntentRecoveryWorker
-
     async def run():
-        path = str(tmp_path / "intents.json")
-        lease_path = str(tmp_path / "leases.json")
-        store = ToolIntentStore(path)
-        leases = ExecutionLeaseStore(lease_path)
-        store.prepare(ToolIntent("k", "c", "write", {}, "exec"))
-        worker = IntentRecoveryWorker(store, leases, "worker-a")
+        store = ToolIntentStore(str(tmp_path / "intents.json"))
+        leases = ExecutionLeaseStore(str(tmp_path / "leases.json"))
+        intent = ToolIntent("e5:step1", "c5", "charge", {}, "e5", "ambiguous")
+        store.prepare(intent)
+        worker = ToolIntentRecoveryWorker(store, leases, "node-a")
         captured = {}
-        def resolver(item):
-            captured["token"] = item.claim_token
-            return "completed", {"ok": True}
-        result = worker.recover_one(store.get("k"), resolver)
-        assert result.status == "completed"
-        assert captured["token"].startswith("recovery:worker-a:1:")
+        class Executor:
+            async def reconcile_intent(self, claimed, resolver):
+                captured["token"] = claimed.claim_token
+                return None
+        result = await worker.recover(Executor(), Resolver())
+        assert result[0].status == "quarantined"
+        parts = captured["token"].split(":")
+        assert parts[:2] == ["recovery", "node-a"]
+        assert parts[2].isdigit()
+        assert int(parts[2]) >= 1
+        assert parts[3]
     asyncio.run(run())

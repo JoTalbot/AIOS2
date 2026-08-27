@@ -31,10 +31,12 @@ class ToolIntentRecoveryWorker:
             if not self.store.renew_claim(key, owner, token): return
 
     async def _recover_one(self, executor, resolver, intent):
-        lease = None; owner = self.owner_id or "local-recovery"; claim_token = uuid.uuid4().hex
+        lease = None; owner = self.owner_id or "local-recovery"
         if self.lease_store is not None:
             lease = self.lease_store.acquire(intent.idempotency_key, self.owner_id)
             if lease is None: return IntentRecoveryResult(intent.idempotency_key, "skipped_by_lease")
+        epoch = lease.fencing_token if lease is not None else "local"
+        claim_token = f"recovery:{owner}:{epoch}:{uuid.uuid4().hex}"
         claimed = self.store.claim(intent.idempotency_key, owner, claim_token)
         if claimed is None:
             if lease is not None: self.lease_store.release(intent.idempotency_key, self.owner_id, lease.fencing_token)
