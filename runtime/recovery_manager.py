@@ -24,6 +24,7 @@ class RecoveryManager:
                 if hasattr(result, "__await__"): await result
             except Exception as exc:
                 self.mark_failed(state, exc, lease=lease)
+                recovered.append(RecoveryOutcome(state.execution_id, "failed"))
                 if not continue_on_error: raise
                 continue
             finally:
