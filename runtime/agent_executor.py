@@ -43,8 +43,10 @@ class AgentExecutor:
                 try:
                     result = await self._execute_with_retry(call, agent_id, permissions, ctx)
                 except ToolPermissionError as exc:
+                    if not self._legacy_sandbox:
+                        raise
                     result = ToolResult.failure(call, exc, retryable=False)
-                results.append(result.value if self._legacy_sandbox else result)
+                results.append(result.value if self._legacy_sandbox and result.ok else result)
                 if self.memory and hasattr(self.memory, "remember"):
                     self.memory.remember({"execution_id": ctx.execution_id, "agent_id": agent_id, "tool": tool, "call_id": call.call_id, "ok": result.ok, "result": result.value, "error": result.error})
             await self._publish(EXECUTION_COMPLETED, ctx, {"agent_id": agent_id, "result_count": len(results)})
