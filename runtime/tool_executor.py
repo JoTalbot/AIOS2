@@ -12,6 +12,7 @@ from .tool_idempotency_store import StoredToolResult, ToolIdempotencyStore
 from .tool_intent_store import ToolIntent, ToolIntentStore
 from .tool_protocol import ToolCall, ToolResult
 from .tool_sandbox import ToolExecutionContext, ToolSandbox
+from .tool_registry import ToolPermissionError
 
 
 class ToolExecutor:
@@ -80,20 +81,18 @@ class ToolExecutor:
                         self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
                     return result
                 except asyncio.CancelledError:
-                    if self.intent_store:
-                        self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
+                    # Keep a possibly in-flight side effect claimed for recovery;
+                    # cancellation must not silently authorize a replay.
                     raise
         return await self._execute_once(call, context, execution_context)
 
     async def reconcile_intent(self, intent: ToolIntent, resolver):
-        """Resolve an ambiguous operation without replaying its side effect.
-
-        Terminal intent transitions belong to the recovery worker, which owns the
-        fencing token. This method only resolves and persists the idempotent result.
-        """
+        """Resolve an ambiguous operation without replaying its side effect."""
         if self.idempotency_store:
             stored = self.idempotency_store.get(intent.idempotency_key)
             if stored:
+                if self.intent_store:
+                    self.intent_store.mark(intent.idempotency_key, "completed")
                 return ToolResult(intent.call_id, intent.tool, stored.ok, stored.value,
                                   stored.error, False, stored.idempotency_key)
         result = resolver(intent)
@@ -103,9 +102,12 @@ class ToolExecutor:
             return None
         if not isinstance(result, ToolResult):
             raise TypeError("resolver must return ToolResult or None")
-        if result.ok and self.idempotency_store:
-            self.idempotency_store.put_if_absent(
-                StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, True, result.value))
+        if result.ok:
+            if self.idempotency_store:
+                self.idempotency_store.put_if_absent(
+                    StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, True, result.value))
+            if self.intent_store:
+                self.intent_store.mark(intent.idempotency_key, "completed")
         return result
 
     async def _execute_once(self, call: ToolCall, context: ToolExecutionContext,
@@ -122,8 +124,10 @@ class ToolExecutor:
             return result
         except asyncio.CancelledError:
             raise
+        except ToolPermissionError:
+            raise
         except Exception as exc:
-            retryable = isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError))
+            retryable = isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError, RuntimeError))
             result = ToolResult.failure(call, exc, retryable=retryable)
             await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id,
                                                    "error": str(exc), "retryable": retryable,
