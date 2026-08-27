@@ -4,7 +4,7 @@ from pathlib import Path
 
 from runtime.execution_commit import ExecutionCommit, ExecutionCommitCoordinator
 from runtime.execution_store import ExecutionStore
-from runtime.audit import ExecutionAuditLog
+from runtime.execution_audit import ExecutionAuditLog
 
 
 def _coordinator(tmp_path):
@@ -61,7 +61,6 @@ def test_quarantine_write_is_serialized_by_journal_lock(tmp_path, monkeypatch):
         lambda path: ObservedLock(),
     )
 
-    # The public reader owns the journal lock while parsing and repairing.
     Path(coordinator.journal_path).write_text("{broken}\n", encoding="utf-8")
     coordinator._read_journal()
 
