@@ -23,13 +23,15 @@ class ExecutionBoundary:
         self.intents = intents
         self.results = results
 
-    def commit(self, *, key: str, call_id: str, tool: str, arguments: dict[str, Any] | None,
+    def commit(self, *, key: str, call_id: str, tool: str,
+               arguments: dict[str, Any] | None = None,
                owner_id: str, claim_token: str, ok: bool, value: Any = None,
                error: str | None = None) -> BoundaryCommit:
         """Persist the outcome, then terminally commit the matching claim.
 
-        If the claim has expired or was fenced by another worker, the durable
-        result remains authoritative and this caller reports ``committed=False``.
+        ``arguments`` is optional for backwards compatibility with direct
+        boundary callers that predate argument-aware idempotency records.
+        ExecutionCoordinator passes the real call arguments when available.
         """
         stored = self.results.put_if_absent(
             StoredToolResult(key, call_id, tool, ok, value if ok else None, error, arguments)
