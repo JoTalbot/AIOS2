@@ -69,6 +69,21 @@ class ExecutionStore:
         tmp.write_text(json.dumps(data, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
         tmp.replace(self.path)
 
+    def create(self, execution_id: str, metadata: Optional[Dict[str, Any]] = None, **fields) -> ExecutionState:
+        """Create a pending execution without allowing accidental overwrite."""
+        with self._lock():
+            data = self._read()
+            if execution_id in data:
+                raise ValueError(f"execution '{execution_id}' already exists")
+            values = dict(fields)
+            values.update(metadata or {})
+            allowed = {"status", "goal", "attempt", "plan", "result", "error", "correlation_id", "version", "fencing_token"}
+            state = ExecutionState(execution_id=execution_id, **{k: v for k, v in values.items() if k in allowed})
+            state.updated_at = datetime.now(timezone.utc).isoformat()
+            data[execution_id] = asdict(state)
+            self._write(data)
+        return state
+
     def save(self, state: ExecutionState, *, _audit: bool = True, expected_version: Optional[int] = None, fencing_token: Optional[int] = None) -> ExecutionState:
         with self._lock():
             data = self._read()
@@ -108,9 +123,6 @@ class ExecutionStore:
             else:
                 state = ExecutionState(**raw)
                 old_status = state.status
-            # Snapshot binding under the repository lock is safe for local
-            # compatibility callers. Distributed callers must still supply an
-            # explicit expected_version through the canonical coordinator.
             if expected_version is None:
                 expected_version = state.version
             if state.version != expected_version:
