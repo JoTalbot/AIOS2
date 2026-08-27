@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Record allocation heartbeat and external run metadata
+        id: heartbeat
+        timeout-minutes: 4
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -29,19 +31,13 @@ jobs:
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "$api" > scheduler-diagnostics/run-metadata.json
-          python3 - <<'PY'
+          python3 - <<'PY' | tee scheduler-diagnostics/latency.txt
           import json
           import os
           from datetime import datetime, timezone
 
-          path = "scheduler-diagnostics/run-metadata.json"
-          data = json.load(open(path, encoding="utf-8"))
-
-          def parse(value):
-              if not value:
-                  return None
-              return datetime.fromisoformat(value.replace("Z", "+00:00"))
-
+          data = json.load(open("scheduler-diagnostics/run-metadata.json", encoding="utf-8"))
+          parse = lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
           created = parse(data.get("created_at"))
           started = parse(data.get("run_started_at"))
           observed = datetime.now(timezone.utc)
@@ -53,13 +49,9 @@ jobs:
           print(f"runner_name={os.environ.get('RUNNER_NAME')}")
           print(f"allocation_observed_at={observed.isoformat().replace('+00:00', 'Z')}")
           if created and started:
-              print(f"workflow_created_to_run_started_seconds={(started-created).total_seconds():.3f}")
+              print(f"queue_duration_seconds={(started-created).total_seconds():.3f}")
           else:
-              print("workflow_created_to_run_started_seconds=unavailable")
-          if started:
-              print(f"run_started_to_observed_seconds={(observed-started).total_seconds():.3f}")
-          else:
-              print("run_started_to_observed_seconds=unavailable")
+              print("queue_duration_seconds=unavailable")
           PY
           {
             echo "event=${GITHUB_EVENT_NAME}"
@@ -75,17 +67,49 @@ jobs:
           } | tee scheduler-diagnostics/heartbeat.txt
           uname -a | tee scheduler-diagnostics/uname.txt
           printf 'probe=ok\n' | tee scheduler-diagnostics/probe.txt
-          python3 - <<'PY' | tee scheduler-diagnostics/latency.txt
+      - name: Publish terminal queue diagnostics
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          mkdir -p scheduler-diagnostics
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          curl --fail-with-body --silent --show-error \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$api" > scheduler-diagnostics/terminal-run.json
+          jq -r '"terminal_status=" + (.status // "unknown"), "terminal_conclusion=" + (.conclusion // "unknown"), "workflow_created_at=" + (.created_at // "unknown"), "run_started_at=" + (.run_started_at // "unknown")' \
+            scheduler-diagnostics/terminal-run.json > scheduler-diagnostics/terminal-summary.txt
+          python3 - <<'PY' "${now}" | tee scheduler-diagnostics/terminal-queue-duration.txt
           import json
+          import sys
           from datetime import datetime, timezone
-          d=json.load(open('scheduler-diagnostics/run-metadata.json', encoding='utf-8'))
-          parse=lambda x: datetime.fromisoformat(x.replace('Z','+00:00')) if x else None
-          c=parse(d.get('created_at')); s=parse(d.get('run_started_at'))
-          print('created_at=', d.get('created_at'))
-          print('run_started_at=', d.get('run_started_at'))
-          print('observed_at=', datetime.now(timezone.utc).isoformat().replace('+00:00','Z'))
-          print('queue_upper_bound_seconds=', f'{(s-c).total_seconds():.3f}' if c and s else 'unavailable')
+
+          now = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+          try:
+              data = json.load(open("scheduler-diagnostics/terminal-run.json", encoding="utf-8"))
+          except Exception:
+              data = {}
+          parse = lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+          created = parse(data.get("created_at"))
+          started = parse(data.get("run_started_at"))
+          print(f"terminal_observed_at={sys.argv[1]}")
+          print(f"terminal_status={data.get('status', 'unknown')}")
+          print(f"terminal_conclusion={data.get('conclusion', 'unknown')}")
+          if created and started:
+              print(f"queue_duration_seconds={(started-created).total_seconds():.3f}")
+              print("queue_duration_state=allocated")
+          elif created:
+              print(f"queue_duration_at_terminal_seconds={(now-created).total_seconds():.3f}")
+              print("queue_duration_state=no_run_started_at")
+          else:
+              print("queue_duration_state=metadata_unavailable")
           PY
+          exit 0
       - name: Upload scheduler diagnostics
         if: always()
         uses: actions/upload-artifact@v4
