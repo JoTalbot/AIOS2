@@ -106,5 +106,5 @@ def test_recovery_claim_token_contains_lease_fencing_epoch(tmp_path):
                 return None
         result = await worker.recover(Executor(), Resolver())
         assert result[0].status == "quarantined"
-        assert captured["token"].startswith("recovery:node-a:1:")
+        assert captured["token"].startswith(f"recovery:node-a:{lease.fencing_token}:")
     asyncio.run(run())
