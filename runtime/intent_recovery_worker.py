@@ -52,14 +52,16 @@ class IntentRecoveryWorker:
                 if not self.lease_store.is_owner_unlocked(lease_key, self.owner_id, lease.fencing_token):
                     self.store.release_claim(intent.idempotency_key, self.owner_id, claim_token)
                     return IntentRecoveryResult(intent.idempotency_key, "skipped_by_lease")
+                # Persist the terminal reconciliation first. A crash before
+                # mark_claimed is repaired by the journal replay path above.
+                if self.journal:
+                    if status == "completed": self.journal.complete(intent.idempotency_key, value)
+                    else: self.journal.fail(intent.idempotency_key, value)
                 committed = self.store.mark_claimed(
                     intent.idempotency_key, self.owner_id, claim_token, status
                 )
                 if committed is None:
-                    return IntentRecoveryResult(intent.idempotency_key, "skipped_by_claim")
-                if self.journal:
-                    if status == "completed": self.journal.complete(intent.idempotency_key, value)
-                    else: self.journal.fail(intent.idempotency_key, value)
+                    return IntentRecoveryResult(intent.idempotency_key, "stale_claim")
             return IntentRecoveryResult(intent.idempotency_key, status)
         finally:
             self.lease_store.release(lease_key, self.owner_id, lease.fencing_token)
