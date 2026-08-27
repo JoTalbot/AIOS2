@@ -1,4 +1,4 @@
-"""Checkpoint adapter that refuses stale execution owners."""
+"""Checkpoint adapter that refuses stale execution owners and propagates fencing."""
 
 from .recovery_checkpoint import RecoveryCheckpoint
 
@@ -22,18 +22,23 @@ class LeaseAwareCheckpoint:
             return token
         raise RuntimeError(f"execution '{execution_id}' lease fence is not owned by '{self.owner_id}'")
 
+    def _fence(self, state, *, acquire=False):
+        token = self._assert_owner(state.execution_id, acquire=acquire)
+        state.fencing_token = token
+        return token
+
     def mark_running(self, state, attempt, plan=None):
-        self._assert_owner(state.execution_id, acquire=state.status == "pending")
+        self._fence(state, acquire=state.status == "pending")
         return self.checkpoint.mark_running(state, attempt, plan)
 
     def mark_completed(self, state, result=None):
-        self._assert_owner(state.execution_id)
+        self._fence(state)
         return self.checkpoint.mark_completed(state, result)
 
     def mark_failed(self, state, error):
-        self._assert_owner(state.execution_id)
+        self._fence(state)
         return self.checkpoint.mark_failed(state, error)
 
     def transition(self, state, status, **updates):
-        self._assert_owner(state.execution_id)
+        self._fence(state)
         return self.checkpoint.transition(state, status, **updates)
