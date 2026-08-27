@@ -87,13 +87,25 @@ class ExecutionStore:
         if self.audit_log and old_status!=state.status:self.audit_log.append(ExecutionAuditEvent(state.execution_id,old_status or "new",state.status,state.attempt,state.error,correlation_id=state.correlation_id))
         return state
     def transition(self,execution_id,status,**updates):
-        state=self.get(execution_id)
-        if not state:
-            if status!="pending":raise KeyError(execution_id)
-            state=ExecutionState(execution_id=execution_id)
-        state.status=status
-        for key,value in updates.items():setattr(state,key,value)
-        return self.compare_and_set(state,state.version)
+        with self.execution_lock():
+            state=self._get_unlocked(execution_id)
+            if not state:
+                if status!="pending":raise KeyError(execution_id)
+                state=ExecutionState(execution_id=execution_id)
+            state.status=status
+            for key,value in updates.items():setattr(state,key,value)
+            return self._save_unlocked(state,state.version)
+    def transition_fenced(self,execution_id,status,expected_version,*,expected_status=None,fencing_token=None,fencing_validator=None,**updates):
+        """Atomically apply a transition while holding the coordination lock."""
+        if not isinstance(expected_version,int) or expected_version<0:raise ValueError("expected_version must be a non-negative integer")
+        with self.execution_lock():
+            state=self._get_unlocked(execution_id)
+            if state is None:raise KeyError(execution_id)
+            if state.version!=expected_version:raise ExecutionVersionConflictError(f"execution '{execution_id}' version changed")
+            if expected_status is not None and state.status!=expected_status:raise ExecutionVersionConflictError(f"execution '{execution_id}' status changed")
+            state.status=status
+            for key,value in updates.items():setattr(state,key,value)
+            return self._save_unlocked(state,expected_version,expected_status=expected_status,fencing_token=fencing_token,fencing_validator=fencing_validator)
     def get(self,execution_id):
         with self.execution_lock():return self._get_unlocked(execution_id)
     def resumable(self):
