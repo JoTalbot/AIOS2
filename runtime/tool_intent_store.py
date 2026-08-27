@@ -15,6 +15,9 @@ except ImportError:  # pragma: no cover
     fcntl = None
 
 
+AMBIGUOUS_STATES = frozenset({"prepared", "executing", "ambiguous"})
+
+
 @dataclass(frozen=True)
 class ToolIntent:
     idempotency_key: str
@@ -87,7 +90,7 @@ class ToolIntentStore:
 
     def pending(self):
         with _IntentLock(self.lock_path):
-            return [ToolIntent(**raw) for raw in self._read().values() if raw.get("state") in {"prepared", "executing"}]
+            return [ToolIntent(**raw) for raw in self._read().values() if raw.get("state") in AMBIGUOUS_STATES]
 
     def _write(self, data):
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
