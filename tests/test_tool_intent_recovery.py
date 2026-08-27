@@ -16,14 +16,14 @@ async def test_stale_recovery_worker_is_fenced(tmp_path):
     worker=ToolIntentRecoveryWorker(store,leases,"node-a"); result=await worker.recover(ToolExecutor(object(),intent_store=store),Resolver()); assert result[0].status=="skipped_by_lease"
 @pytest.mark.asyncio
 async def test_lease_loss_between_reconcile_and_terminal_mark_is_fenced(tmp_path):
-    lock=tmp_path/"coord.lock"; store=ToolIntentStore(str(tmp_path/"intents.json"),coordination_lock_path=str(lock)); leases=ExecutionLeaseStore(str(tmp_path/"leases.json"),coordination_lock_path=str(lock)); intent=ToolIntent("e3:step1","c3","charge",{},"e3","ambiguous"); store.prepare(intent)
+    lock=tmp_path/"coord.lock"; store=ToolIntentStore(str(tmp_path/"intents.json"),coordination_lock_path=str(lock))
+    leases=ExecutionLeaseStore(str(tmp_path/"leases.json"),coordination_lock_path=str(lock)); intent=ToolIntent("e3:step1","c3","charge",{},"e3","ambiguous"); store.prepare(intent)
     class LosingLeaseStore(ExecutionLeaseStore):
         def __init__(self,*args,**kwargs): super().__init__(*args,**kwargs); self.checks=0
         def is_owner_unlocked(self,execution_id,owner_id,fencing_token=None):
             self.checks+=1
             if self.checks==2:
-                current=self._read()[execution_id]; current["owner_id"]="node-b"; current["fencing_token"]=int(current["fencing_token"])+1; self._write(self._read())
-                return False
+                data=self._read(); current=data[execution_id]; current["owner_id"]="node-b"; current["fencing_token"]=int(current["fencing_token"])+1; self._write(data); return False
             return True
     losing=LosingLeaseStore(str(tmp_path/"leases2.json"),coordination_lock_path=str(lock)); worker=ToolIntentRecoveryWorker(store,losing,"node-a")
     class Result: ok=True
