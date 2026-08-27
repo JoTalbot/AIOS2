@@ -68,22 +68,28 @@ class ToolExecutor:
                 raise
 
     async def reconcile_intent(self, intent: ToolIntent, resolver):
-        """Resolve an ambiguous operation without replaying its side effect.
+        """Resolve an ambiguous operation and persist its terminal state.
 
-        This method is deliberately side-effect-free with respect to the intent
-        claim. The caller that owns the fencing claim performs the terminal
-        transition, so reconciliation cannot race its owner and double-finalize.
+        When invoked by a fencing-aware recovery worker, the worker owns the
+        claim and is responsible for the final CAS. For standalone recovery,
+        there is no claim owner, so this method safely finalizes the intent
+        itself after the durable result is known.
         """
         if self.idempotency_store:
             stored = self.idempotency_store.get(intent.idempotency_key)
             if stored:
-                return ToolResult(intent.call_id, intent.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
+                result = ToolResult(intent.call_id, intent.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
+                if self.intent_store and not (intent.owner_id and intent.claim_token):
+                    self.intent_store.mark(intent.idempotency_key, "completed" if result.ok else "failed")
+                return result
         result = resolver(intent)
         if hasattr(result, "__await__"): result = await result
         if result is None: return None
         if not isinstance(result, ToolResult): raise TypeError("resolver must return ToolResult or None")
         if result.ok and self.idempotency_store:
             self.idempotency_store.put_if_absent(StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, True, result.value))
+        if self.intent_store and not (intent.owner_id and intent.claim_token):
+            self.intent_store.mark(intent.idempotency_key, "completed" if result.ok else "failed")
         return result
 
     async def _publish(self, event_type: str, context: ExecutionContext, data: dict):
