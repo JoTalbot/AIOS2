@@ -22,8 +22,8 @@ async def test_loop_persists_completed_state(tmp_path):
     loop = AutonomousExecutionLoop(Executor(), Planner(), ReplanningPolicy(max_attempts=2), store=store)
     result = await loop.run("demo", "agent-1")
     assert result.status == "completed"
-    state = store.get(next(iter(store._read())))
-    assert state.status == "completed"
+    execution_id = store.execution_ids()[0]
+    assert store.get(execution_id).status == "completed"
 
 
 @pytest.mark.asyncio
