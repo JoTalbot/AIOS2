@@ -28,13 +28,17 @@ jobs:
 
   tests:
     needs: runner-check
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
       - run: python -m pip install -U pip pytest pytest-asyncio fastapi pydantic httpx
       - run: python -m pytest tests -q
 
@@ -53,3 +57,21 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -U pip pytest fastapi pydantic httpx
       - run: python -m pytest tests/test_recovery_rbac_matrix.py -q
+
+  canonical-validation:
+    needs: runner-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -U pip pytest pytest-asyncio fastapi pydantic httpx
+      - name: Canonical runtime validation
+        run: |
+          if [ -f scripts/validate_canonical_runtime.py ]; then
+            python scripts/validate_canonical_runtime.py
+          else
+            python -m pytest tests -q
+          fi
