@@ -7,7 +7,7 @@ on:
 
 jobs:
   security-regression:
-    runs-on: ubuntu-latest
+    runs-on: runnerhut-rh-d015dc0aef11
     env:
       AIOS_OPERATOR_TOKEN: ci-test-token-16
       AIOS_OPERATOR_ROLE: operator
