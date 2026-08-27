@@ -19,7 +19,7 @@ class RuntimeBootstrap:
     async def _heartbeat(self, execution_id, fencing_token):
         while True:
             await asyncio.sleep(self.heartbeat_interval)
-            if self.lease_store.renew(execution_id,self.owner_id) is None: raise RuntimeError(f"execution lease lost: {execution_id}")
+            if self.lease_store.renew(execution_id,self.owner_id,fencing_token) is None: raise RuntimeError(f"execution lease lost: {execution_id}")
             if not self.lease_store.is_owner(execution_id,self.owner_id,fencing_token): raise RuntimeError(f"execution lease fenced: {execution_id}")
     def _reconcile(self):
         if self.commit_coordinator is None: return 0,0
@@ -39,7 +39,7 @@ class RuntimeBootstrap:
                 if not self.lease_store.is_owner(state.execution_id,self.owner_id,lease.fencing_token):
                     skipped+=1; continue
                 await resume(state); recovered+=1
-            except Exception as exc: failed+=1; self.recovery_manager.mark_failed(state,exc)
+            except Exception as exc: failed+=1; self.recovery_manager.mark_failed(state,exc,lease=lease)
             finally:
                 heartbeat.cancel()
                 try: await heartbeat
