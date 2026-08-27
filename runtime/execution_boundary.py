@@ -23,8 +23,8 @@ class ExecutionBoundary:
         self.intents = intents
         self.results = results
 
-    def commit(self, *, key: str, call_id: str, tool: str, owner_id: str,
-               claim_token: str, ok: bool, value: Any = None,
+    def commit(self, *, key: str, call_id: str, tool: str, arguments: dict[str, Any] | None,
+               owner_id: str, claim_token: str, ok: bool, value: Any = None,
                error: str | None = None) -> BoundaryCommit:
         """Persist the outcome, then terminally commit the matching claim.
 
@@ -32,7 +32,7 @@ class ExecutionBoundary:
         result remains authoritative and this caller reports ``committed=False``.
         """
         stored = self.results.put_if_absent(
-            StoredToolResult(key, call_id, tool, ok, value if ok else None, error)
+            StoredToolResult(key, call_id, tool, ok, value if ok else None, error, arguments)
         )
         terminal = "completed" if stored.ok else "failed"
         intent = self.intents.mark_claimed(key, owner_id, claim_token, terminal)
