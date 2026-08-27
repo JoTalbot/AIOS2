@@ -1,6 +1,6 @@
 import pytest
 
-from runtime.execution_store import ExecutionFencingConflictError, ExecutionState, ExecutionStore
+from runtime.execution_store import ExecutionState, ExecutionStore
 from runtime.recovery_manager import RecoveryManager
 
 
@@ -39,7 +39,8 @@ async def test_recovery_rejects_lease_fenced_after_resume(tmp_path):
 
     outcomes = await manager.recover(_Loop(), object())
 
-    assert outcomes[0].status == "failed"
+    # Losing the lease after resume is a fencing outcome, not a worker failure.
+    assert outcomes[0].status == "stale"
     assert store.get("e1").status == "running"
     assert leases.released is True
 
@@ -60,5 +61,6 @@ async def test_recovery_does_not_mark_failed_after_fencing_race(tmp_path):
         resume = fail_resume
 
     outcomes = await manager.recover(Loop(), object())
-    assert outcomes[0].status == "failed"
-    assert store.get("e1").status == "failed"
+    assert outcomes[0].status == "stale"
+    assert store.get("e1").status == "running"
+    assert leases.released is True
