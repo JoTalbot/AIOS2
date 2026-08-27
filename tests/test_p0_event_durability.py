@@ -10,12 +10,7 @@ def test_commit_audit_is_derived_from_committed_transition(tmp_path):
     store = ExecutionStore(str(tmp_path / "execution.json"), audit_log=audit)
     state = ExecutionState("e1", status="pending", fencing_token=3)
     store.save(state)
-    coordinator = ExecutionCommitCoordinator(
-        store,
-        audit,
-        str(tmp_path / "journal.jsonl"),
-        str(tmp_path / "quarantine.jsonl"),
-    )
+    coordinator = ExecutionCommitCoordinator(store, audit, str(tmp_path / "journal.jsonl"), str(tmp_path / "quarantine.jsonl"))
 
     coordinator.commit(state, "running", fencing_token=3)
 
@@ -25,7 +20,7 @@ def test_commit_audit_is_derived_from_committed_transition(tmp_path):
     assert persisted.version == 1
     assert records
     assert records[-1]["execution_id"] == "e1"
-    assert records[-1]["status"] == "running"
+    assert records[-1]["to_status"] == "running"
     assert records[-1]["version"] == 1
 
 
@@ -34,8 +29,5 @@ def test_failed_precommit_does_not_emit_committed_event(tmp_path):
     store = ExecutionStore(str(tmp_path / "execution.json"), audit_log=audit)
     state = ExecutionState("e1", status="pending", fencing_token=3)
     store.save(state)
-
-    # No coordinator mutation means no lifecycle event can truthfully claim a
-    # committed transition.
     assert audit.read_all() == []
     assert store.get("e1").version == 0
