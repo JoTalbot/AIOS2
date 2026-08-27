@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   probe:
@@ -16,9 +17,20 @@ jobs:
     steps:
       - name: Record allocation heartbeat
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
           mkdir -p scheduler-diagnostics
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          run_json=$(curl --fail-with-body --silent --show-error \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${api}")
+          created_at=$(printf '%s' "${run_json}" | jq -r '.created_at // empty')
+          run_started_at=$(printf '%s' "${run_json}" | jq -r '.run_started_at // empty')
           {
             echo "event=${GITHUB_EVENT_NAME}"
             echo "run_id=${GITHUB_RUN_ID}"
@@ -29,10 +41,29 @@ jobs:
             echo "runner=${RUNNER_NAME}"
             echo "os=${RUNNER_OS}"
             echo "arch=${RUNNER_ARCH}"
-            echo "allocation_heartbeat=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "workflow_created_at=${created_at}"
+            echo "run_started_at=${run_started_at}"
+            echo "allocation_observed_at=${now}"
           } | tee scheduler-diagnostics/heartbeat.txt
+          printf '%s\n' "${run_json}" > scheduler-diagnostics/run.json
           uname -a | tee scheduler-diagnostics/uname.txt
           printf 'probe=ok\n' | tee scheduler-diagnostics/probe.txt
+          python3 - <<'PY' "${created_at}" "${run_started_at}" "${now}" | tee scheduler-diagnostics/latency.txt
+          import datetime as dt
+          import sys
+
+          def parse(value):
+              return dt.datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+          created, started, observed = map(parse, sys.argv[1:])
+          print(f"workflow_created_at={created.isoformat() if created else 'unknown'}")
+          print(f"run_started_at={started.isoformat() if started else 'unknown'}")
+          print(f"allocation_observed_at={observed.isoformat()}")
+          if created and started:
+              print(f"run_creation_to_started_seconds={(started-created).total_seconds():.3f}")
+          if started:
+              print(f"started_to_observed_seconds={(observed-started).total_seconds():.3f}")
+          PY
       - name: Upload scheduler diagnostics
         if: always()
         uses: actions/upload-artifact@v4
