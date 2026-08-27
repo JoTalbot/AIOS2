@@ -29,7 +29,7 @@ class ExecutionStore:
     def __init__(self,path="data/executions.json",state_machine=None,audit_log=None,coordination_lock_path=None):
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True); self.lock_path=self.path.with_suffix(self.path.suffix+".lock"); self.coordination_lock_path=Path(coordination_lock_path) if coordination_lock_path else None; self.state_machine=state_machine or ExecutionStateMachine(); self.audit_log=audit_log
         if not self.path.exists():
-            with _FileLock(self.lock_path):
+            with self.execution_lock():
                 if not self.path.exists(): self._write({})
     def execution_lock(self): return _FileLock(self.coordination_lock_path or self.lock_path)
     def _read_unlocked(self):
@@ -67,7 +67,7 @@ class ExecutionStore:
         value=dict(raw);value["result"]=self._decode_value(value.get("result"));return ExecutionState(**value)
     def _get_unlocked(self,execution_id): return self._decode_state(self._read_unlocked().get(execution_id))
     def execution_ids(self):
-        with _FileLock(self.lock_path): return list(self._read_unlocked())
+        with self.execution_lock(): return list(self._read_unlocked())
     def save(self,state):return self._save(state,None,validate_transition=False)
     def compare_and_set(self,state,expected_version,*,expected_status=None,fencing_token=None,fencing_validator=None,lock_held=False):
         if not isinstance(expected_version,int) or expected_version<0:raise ValueError("expected_version must be a non-negative integer")
@@ -80,6 +80,7 @@ class ExecutionStore:
         data=self._read_unlocked(); previous=data.get(state.execution_id); current_version=self._version(previous)
         if expected_version is not None and current_version!=expected_version:raise ExecutionVersionConflictError(f"execution '{state.execution_id}' version changed")
         if expected_status is not None and (previous or {}).get("status","pending")!=expected_status:raise ExecutionVersionConflictError(f"execution '{state.execution_id}' status changed")
+        if fencing_token is not None and fencing_validator is None:raise ExecutionFencingConflictError("fencing token supplied without a validator")
         if fencing_validator is not None and not fencing_validator(state.execution_id,fencing_token):raise ExecutionFencingConflictError(f"execution '{state.execution_id}' fencing token is stale")
         if previous and validate_transition:self.state_machine.validate(previous.get("status","pending"),state.status)
         old_status=previous.get("status","pending") if previous else None; state.version=current_version+1; state.updated_at=datetime.now(timezone.utc).isoformat(); data[state.execution_id]=asdict(state); self._write(data)
@@ -94,7 +95,7 @@ class ExecutionStore:
         for key,value in updates.items():setattr(state,key,value)
         return self.compare_and_set(state,state.version)
     def get(self,execution_id):
-        with _FileLock(self.lock_path):return self._get_unlocked(execution_id)
+        with self.execution_lock():return self._get_unlocked(execution_id)
     def resumable(self):
-        with _FileLock(self.lock_path):values=list(self._read_unlocked().values())
+        with self.execution_lock():values=list(self._read_unlocked().values())
         return [ExecutionState(**{**raw,"result":self._decode_value(raw.get("result"))}) for raw in values if raw.get("status") in {"running","retrying"} or (raw.get("status")=="pending" and raw.get("attempt",0)>0)]
