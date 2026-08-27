@@ -30,7 +30,7 @@ class ToolExecutor:
         lock = self._idempotent_locks.setdefault(key, asyncio.Lock())
         async with lock:
             cached = self._idempotent_results.get(key)
-            if cached is not None: return cached
+            if cached is not None and not cached.retryable: return cached
             if self.idempotency_store:
                 stored = self.idempotency_store.get(key)
                 if stored:
@@ -39,14 +39,14 @@ class ToolExecutor:
             claimed_intent = False
             if self.intent_store:
                 intent = self.intent_store.prepare(ToolIntent(key, call.call_id, call.tool, call.arguments, getattr(execution_context, "execution_id", None)))
-                if intent.state == "completed" and self.idempotency_store:
+                if intent.state in {"completed", "failed"} and self.idempotency_store:
                     stored = self.idempotency_store.get(key)
                     if stored:
                         result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key); self._idempotent_results[key] = result; return result
                 claimed = self.intent_store.claim(key, claim_owner, claim_token)
                 if claimed is None:
                     current = self.intent_store.get(key)
-                    if current and current.state == "completed" and self.idempotency_store:
+                    if current and current.state in {"completed", "failed"} and self.idempotency_store:
                         stored = self.idempotency_store.get(key)
                         if stored:
                             result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key); self._idempotent_results[key] = result; return result
@@ -54,6 +54,10 @@ class ToolExecutor:
                 claimed_intent = True
             try:
                 result = await self._execute_once(call, context, execution_context)
+                if result.retryable:
+                    if claimed_intent and self.intent_store: self.intent_store.release_claim(key, claim_owner, claim_token, "ambiguous")
+                    self._idempotent_results[key] = result
+                    return result
                 if self.idempotency_store:
                     stored = self.idempotency_store.put_if_absent(StoredToolResult(key, call.call_id, call.tool, result.ok, result.value if result.ok else None, result.error))
                     result = ToolResult(call.call_id, call.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
@@ -70,16 +74,14 @@ class ToolExecutor:
         if self.idempotency_store:
             stored = self.idempotency_store.get(intent.idempotency_key)
             if stored:
-                result = ToolResult(intent.call_id, intent.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
-                if self.intent_store and not (intent.owner_id and intent.claim_token): self.intent_store.mark(intent.idempotency_key, "completed" if result.ok else "failed")
-                return result
+                if self.intent_store and not (intent.owner_id and intent.claim_token): self.intent_store.mark(intent.idempotency_key, "completed" if stored.ok else "failed")
+                return ToolResult(intent.call_id, intent.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
         result = resolver(intent)
         if hasattr(result, "__await__"): result = await result
         if result is None: return None
         if not isinstance(result, ToolResult): raise TypeError("resolver must return ToolResult or None")
         if self.idempotency_store:
             stored = self.idempotency_store.put_if_absent(StoredToolResult(intent.idempotency_key, intent.call_id, intent.tool, result.ok, result.value if result.ok else None, result.error))
-            result = ToolResult(intent.call_id, intent.tool, stored.ok, stored.value, stored.error, False, stored.idempotency_key)
         if self.intent_store and not (intent.owner_id and intent.claim_token): self.intent_store.mark(intent.idempotency_key, "completed" if result.ok else "failed")
         return result
 
