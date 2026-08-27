@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -66,10 +67,9 @@ async def test_claim_loss_fails_closed(tmp_path):
         ToolExecutionContext("agent"),
     ))
     await started.wait()
-    # Simulate an external claim takeover after the original claim expires.
-    raw = intent_store.path.read_text()
-    raw = raw.replace('"claim_expires_at": "', '"claim_expires_at": "2000-01-01T00:00:00+00:00", "_old_claim_expires_at": "', 1)
-    intent_store.path.write_text(raw)
+    raw = json.loads(intent_store.path.read_text())
+    raw["k"]["claim_expires_at"] = "2000-01-01T00:00:00+00:00"
+    intent_store.path.write_text(json.dumps(raw))
     await asyncio.sleep(0.5)
     release.set()
     result = await task
