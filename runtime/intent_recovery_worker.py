@@ -29,31 +29,31 @@ class IntentRecoveryWorker:
         if lease is None:
             return IntentRecoveryResult(intent.idempotency_key, "skipped_by_lease")
 
-        # Journal replay must precede claiming. A terminal record is the
-        # durable commit point and may need to repair a stale pre-crash claim.
-        if self.journal:
-            record = self.journal.get(intent.idempotency_key)
-            if record and record.status in {"completed", "failed"}:
-                with self.lease_store.execution_lock():
-                    if self.lease_store.is_owner_unlocked(lease_key, self.owner_id, lease.fencing_token):
-                        finalized = self.store.finalize_from_journal(intent.idempotency_key, record.status)
-                        if finalized is not None:
-                            self.lease_store.release(lease_key, self.owner_id, lease.fencing_token)
-                            return IntentRecoveryResult(intent.idempotency_key, record.status, "journal_replay")
-
-        claim_token = f"recovery:{self.owner_id}:{lease.fencing_token}:{uuid4().hex}"
-        claimed = self.store.claim(intent.idempotency_key, self.owner_id, claim_token)
-        if claimed is None:
-            self.lease_store.release(lease_key, self.owner_id, lease.fencing_token)
-            return IntentRecoveryResult(intent.idempotency_key, "skipped_by_claim")
-        if self.journal:
-            record = self.journal.begin(intent.idempotency_key, intent.execution_id)
-            if record.status in {"completed", "failed"}:
-                with self.lease_store.execution_lock():
-                    if self.lease_store.is_owner_unlocked(lease_key, self.owner_id, lease.fencing_token):
-                        self.store.finalize_from_journal(intent.idempotency_key, record.status)
-                return IntentRecoveryResult(intent.idempotency_key, record.status, "journal_replay")
         try:
+            # Journal replay must precede claiming. A terminal record is the
+            # durable commit point and may need to repair a stale pre-crash claim.
+            if self.journal:
+                record = self.journal.get(intent.idempotency_key)
+                if record and record.status in {"completed", "failed"}:
+                    with self.lease_store.execution_lock():
+                        if self.lease_store.is_owner_unlocked(lease_key, self.owner_id, lease.fencing_token):
+                            finalized = self.store.finalize_from_journal(intent.idempotency_key, record.status)
+                        else:
+                            finalized = None
+                    if finalized is not None:
+                        return IntentRecoveryResult(intent.idempotency_key, record.status, "journal_replay")
+
+            claim_token = f"recovery:{self.owner_id}:{lease.fencing_token}:{uuid4().hex}"
+            claimed = self.store.claim(intent.idempotency_key, self.owner_id, claim_token)
+            if claimed is None:
+                return IntentRecoveryResult(intent.idempotency_key, "skipped_by_claim")
+            if self.journal:
+                record = self.journal.begin(intent.idempotency_key, intent.execution_id)
+                if record.status in {"completed", "failed"}:
+                    with self.lease_store.execution_lock():
+                        if self.lease_store.is_owner_unlocked(lease_key, self.owner_id, lease.fencing_token):
+                            self.store.finalize_from_journal(intent.idempotency_key, record.status)
+                    return IntentRecoveryResult(intent.idempotency_key, record.status, "journal_replay")
             status, value = resolver(claimed)
             if status not in {"completed", "failed"}:
                 if self.journal:
