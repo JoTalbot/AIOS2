@@ -96,6 +96,10 @@ class ToolExecutor:
             value = await asyncio.wait_for(operation, timeout=call.timeout) if call.timeout is not None else await operation
             result = value if isinstance(value, ToolResult) else ToolResult.success(call, value)
             await self._publish(TOOL_COMPLETED, ctx, {"tool": call.tool, "call_id": call.call_id, "idempotency_key": call.idempotency_key}); return result
+        except asyncio.TimeoutError as exc:
+            result = ToolResult.failure(call, exc, retryable=False)
+            await self._publish(TOOL_FAILED, ctx, {"tool": call.tool, "call_id": call.call_id, "error": str(exc), "retryable": False, "ambiguous": True, "idempotency_key": call.idempotency_key})
+            return result
         except asyncio.CancelledError: raise
         except ToolPermissionError: raise
         except ToolBoundaryError: raise
