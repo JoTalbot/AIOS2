@@ -1,35 +1,32 @@
-# AIOS New Architecture — Shared Agent Status
+# AIOS2 Shared Agent Status
 
 ## Current phase
-- Phase: isolated new architecture hardening and Cognition/Runtime integration
-- Branch: `batch/18-cognition-runtime-boundary`
-- Latest integrated commit on `main`: `70bd953ab6c9a7a0ff9965a873a992e6c0131a80`
-- Active work commit: `168dab761fc7c7584e50a37957a1705c38f24254`
+- Phase: production hardening of the vNext execution/recovery path
+- Branch: `batch/24-coordination-lock-unification`
+- Latest integrated commit on `main`: `8c9dc3b87dfaa075317959c0893acb9c4e7b40c1`
+- Active work commits: `058adaff1c67f5b50071502e69bd126f29781249`, `1ca1dcc64995ab3e8163c0cf7085fb95e4b2200d`
 - Active PR: pending creation
 
-## Current architecture work
-- vNext orchestration/execution path.
-- Persistence, checkpoint, recovery, leases and audit contracts remain owned by Runtime.
+## Current architecture
+- Runtime owns execution identity, persistence, checkpoints, recovery, leases, fencing and audit.
 - Cognition is an ephemeral decision boundary over the canonical `ExecutionContext`.
-- Cognition components do not own stores, leases, checkpoints, recovery or tool execution.
-- Execution identity and lifecycle remain runtime-owned; cognition receives and returns decisions without durable side effects.
+- Execution persistence and lease coordination must use one execution-scoped coordination lock when configured.
 
-## Batch 18 — Unified Cognition/Runtime Boundary
-- Added provider-independent cognition contracts for Planner, Evaluator, Reflector and Learner.
-- Added `CognitionRequest` and `CognitionDecision` bound to the canonical runtime `ExecutionContext`.
-- Added `CognitionPipeline` that composes cognition stages without introducing a second execution state path.
-- Added regression coverage proving one execution context flows through all cognition stages and runtime ownership is not duplicated.
+## Batch 24 — Coordination lock unification
+- Fixed `ExecutionStore._save()` and therefore normal `save()`/CAS writes to acquire `execution_lock()` instead of bypassing the configured coordination lock.
+- This closes a split-lock race where lease operations and state CAS could coordinate on different lock files.
+- Added regression coverage proving CAS uses the configured coordination lock.
 
 ## Validation
-- Focused tests added in `tests/test_cognition_boundary.py`.
-- GitHub Actions is authoritative; branch currently has no workflow run reported yet.
-- Target: `main`.
+- Focused regression tests added in `tests/test_execution_lock_protocol.py`.
+- Local execution is not available through the GitHub connector; GitHub Actions is authoritative.
+- Branch is based directly on current `main` and is 2 commits ahead, 0 behind.
 
 ## Next actions
-1. Create PR for Batch 18 and wait for GitHub Actions validation.
-2. Fix any CI failures only on the owning branch.
-3. Merge only after required CI is green, then update this status on `main`.
-4. Continue Batch 18 integration by adapting `VNextOrchestrator` to consume the cognition boundary without moving durable lifecycle ownership into Cognition.
+1. Open PR for Batch 24 and wait for GitHub Actions.
+2. Fix CI failures on this owning branch only.
+3. Merge only after CI is green.
+4. Rescan execution/recovery boundaries for the next concurrency, durability or security issue.
 
 ## Rules
-Every agent updates this file before and after significant work. GitHub is the source of truth; do not rely on local chat history.
+GitHub is the source of truth. Every significant step updates this file. Do not force-push shared branches.

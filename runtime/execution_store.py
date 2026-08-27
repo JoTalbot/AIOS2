@@ -74,7 +74,7 @@ class ExecutionStore:
         if lock_held:return self._save_unlocked(state,expected_version,True,expected_status=expected_status,fencing_token=fencing_token,fencing_validator=fencing_validator)
         return self._save(state,expected_version,True,expected_status=expected_status,fencing_token=fencing_token,fencing_validator=fencing_validator)
     def _save(self,state,expected_version,validate_transition=True,**kwargs):
-        with _FileLock(self.lock_path):return self._save_unlocked(state,expected_version,validate_transition,**kwargs)
+        with self.execution_lock():return self._save_unlocked(state,expected_version,validate_transition,**kwargs)
     def _save_unlocked(self,state,expected_version,validate_transition=True,*,expected_status=None,fencing_token=None,fencing_validator=None):
         if not state.execution_id:raise ValueError("execution_id must be a non-empty string")
         data=self._read_unlocked(); previous=data.get(state.execution_id); current_version=self._version(previous)
