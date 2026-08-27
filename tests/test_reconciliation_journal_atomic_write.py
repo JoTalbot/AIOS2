@@ -30,3 +30,19 @@ def test_atomic_write_leaves_no_tmp_after_success(tmp_path):
 
     assert path.exists()
     assert not path.with_suffix(path.suffix + ".tmp").exists()
+
+
+def test_recovery_ignores_stale_tmp_and_keeps_durable_journal(tmp_path):
+    path = tmp_path / "journal.json"
+    journal = ReconciliationJournal(str(path))
+    journal.begin("intent-1", "exec-1")
+    durable = path.read_text(encoding="utf-8")
+
+    tmp_path.joinpath("journal.json.tmp").write_text(
+        '{"intent-1": {"status": "completed", "result": {"corrupt": true}}}',
+        encoding="utf-8",
+    )
+
+    recovered = ReconciliationJournal(str(path))
+    assert path.read_text(encoding="utf-8") == durable
+    assert recovered.get("intent-1").status == "pending"
