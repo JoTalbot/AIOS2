@@ -6,17 +6,18 @@ on:
   pull_request:
 
 env:
+  PYTHONUNBUFFERED: '1'
   PYTEST_ADDOPTS: "-ra --strict-markers"
 
 jobs:
   baseline:
     name: baseline / ${{ matrix.group }}
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
         group: [unit, integration, runtime, e2e]
-    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,14 +25,41 @@ jobs:
           python-version: '3.11'
       - name: Install test dependencies
         run: python -m pip install -U pip pytest pytest-asyncio pytest-timeout fastapi pydantic httpx
-      - name: Run ${{ matrix.group }} baseline tests with hang diagnostics
+      - name: Collect ${{ matrix.group }} inventory
         shell: bash
         run: |
           mkdir -p test-results
-          python -m pytest tests -q -m "${{ matrix.group }}" \
+          python -m pytest tests --collect-only -q -m "${{ matrix.group }} and not chaos" \
+            2>&1 | tee "test-results/${{ matrix.group }}-collection.log"
+      - name: Run ${{ matrix.group }} baseline with timeout diagnostics
+        shell: bash
+        run: |
+          python -m pytest tests -vv -rA -m "${{ matrix.group }} and not chaos" \
             --timeout=60 --timeout-method=thread \
-            --durations=25 --junitxml="test-results/${{ matrix.group }}.xml" \
+            --durations=25 \
+            --junitxml="test-results/${{ matrix.group }}.xml" \
             2>&1 | tee "test-results/${{ matrix.group }}.log"
+      - name: Capture process and filesystem diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo '=== GROUP ==='
+            echo '${{ matrix.group }}'
+            echo '=== PROCESS TREE ==='
+            ps -ef --forest || true
+            echo '=== PYTEST/PYTHON ==='
+            pgrep -a -f 'pytest|python' || true
+            echo '=== OPEN FILES ==='
+            for pid in $(pgrep -f 'pytest|python' || true); do
+              echo "--- PID $pid ---"
+              lsof -p "$pid" 2>/dev/null | tail -n 80 || true
+            done
+            echo '=== THREAD/FD STATE ==='
+            for pid in $(pgrep -f 'pytest|python' || true); do
+              cat "/proc/$pid/status" 2>/dev/null | grep -E 'State|Threads|FDSize' || true
+            done
+          } | tee "test-results/${{ matrix.group }}-hang-diagnostics.log"
       - name: Upload ${{ matrix.group }} diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -43,7 +71,7 @@ jobs:
   chaos:
     name: chaos / destructive fault injection
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -52,4 +80,17 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -U pip pytest pytest-asyncio pytest-timeout fastapi pydantic httpx
       - name: Run chaos tests with hard timeout
-        run: python -m pytest tests -q -m chaos --timeout=90 --timeout-method=thread --durations=25
+        timeout-minutes: 20
+        run: |
+          mkdir -p test-results
+          python -m pytest tests -vv -rA -m chaos \
+            --timeout=90 --timeout-method=thread \
+            --durations=25 --junitxml=test-results/chaos.xml \
+            2>&1 | tee test-results/chaos.log
+      - name: Upload chaos diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-diagnostics
+          path: test-results/
+          if-no-files-found: warn
