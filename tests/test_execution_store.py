@@ -37,3 +37,5 @@ def test_fencing_validator_can_reject_write(tmp_path):
     with pytest.raises(ExecutionFencingConflictError):
         store.compare_and_set(ExecutionState("exec-fence"), 0, fencing_token=1, fencing_validator=lambda *_: False)
     assert store.get("exec-fence") is None
+
+# CI trigger: fencing regression suite must execute on the current workflow attempt.
