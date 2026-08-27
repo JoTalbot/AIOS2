@@ -12,6 +12,8 @@ concurrency:
 permissions:
   contents: read
 
+# Keep push-triggered verification on the branch HEAD; reruns of an older run
+# intentionally remain pinned to that run's original SHA.
 jobs:
   test:
     runs-on: ubuntu-latest
