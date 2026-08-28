@@ -1,20 +1,34 @@
-"""Coordinate durable tool commits with execution-state transitions."""
-from typing import Any
+"""Cross-layer commit coordinator for tool-backed executions.
 
-from .execution_boundary import ExecutionBoundary, BoundaryCommit
-from .execution_state import ExecutionState
+The coordinator keeps the two durable protocols ordered: a terminal tool
+outcome is persisted first, then the execution lifecycle is committed. This
+makes a crash between the two phases recoverable without replaying the tool.
+"""
+from dataclasses import dataclass
+from typing import Any, Optional
+
+from .execution_boundary import BoundaryCommit, ExecutionBoundary
+from .execution_commit import ExecutionCommit, ExecutionCommitCoordinator
+from .execution_store import ExecutionState
+from .tool_idempotency_store import ToolIdempotencyStore
+from .tool_intent_store import ToolIntentStore
 
 
+@dataclass(frozen=True)
 class ToolExecutionCommit:
-    def __init__(self, tool_commit: BoundaryCommit, execution_commit):
-        self.tool_commit = tool_commit
-        self.execution_commit = execution_commit
+    tool: BoundaryCommit
+    execution: Optional[ExecutionCommit]
 
 
 class ToolExecutionCoordinator:
-    def __init__(self, executions, boundary: ExecutionBoundary):
+    def __init__(
+        self,
+        intents: ToolIntentStore,
+        results: ToolIdempotencyStore,
+        executions: ExecutionCommitCoordinator,
+    ):
+        self.boundary = ExecutionBoundary(intents, results)
         self.executions = executions
-        self.boundary = boundary
 
     def commit(
         self,
