@@ -4,6 +4,7 @@ from typing import Callable, Optional
 from fastapi import FastAPI, HTTPException, Request
 from runtime.recovery_api import RecoveryOperatorService
 from runtime.recovery_http import build_recovery_router
+from runtime.operational_status import build_operational_status
 from .auth_config import ControlPlaneAuthConfig
 from .security import SecurityContext, authenticate
 
@@ -43,6 +44,10 @@ def create_app(*, recovery_service: Optional[RecoveryOperatorService] = None, op
                 "runtime": "managed"
             }
         }
+
+    @app.get("/system/status", tags=["system"])
+    async def system_status():
+        return build_operational_status()
 
     app.include_router(build_recovery_router(service, authorize_operator=authorize))
     return app
