@@ -29,3 +29,8 @@ def validate_startup() -> dict:
         "status": "ready" if all(value == "ok" for value in checks.values()) else "degraded",
         "checks": checks,
     }
+
+
+def build_startup_report() -> dict:
+    """Compatibility wrapper for operational status reporting."""
+    return validate_startup()
