@@ -13,34 +13,48 @@ Main components:
 - `tests/` — regression and integration coverage
 - `.github/workflows/` — CI automation
 
-## Development
-
-Requirements:
+## Requirements
 
 - Python 3.11+
 - pip
 
-Install test dependencies:
+## Install
 
 ```bash
 python -m pip install -U pip pytest pytest-asyncio fastapi pydantic httpx
 ```
 
-Run tests:
+## Validation
+
+Run the complete test suite:
 
 ```bash
 pytest tests -q
 ```
 
+## Runtime Validation
+
+Available checks:
+
+- `/health` — service availability
+- `/ready` — readiness validation
+- `/diagnostics` — operational diagnostics
+
 ## CI
 
-GitHub Actions runs validation, regression tests and security checks on pushes and pull requests.
+GitHub Actions validates regression tests, security checks and production smoke validation on repository changes.
 
-## Status
+## Release Status
 
-The project is under active development. Current focus areas:
+AIOS2 has completed the production readiness validation cycle.
+
+Completed areas:
 
 - runtime stability
 - autonomous execution flows
 - API hardening
-- recovery and security validation
+- recovery validation
+- security checks
+- regression coverage
+
+The project is prepared for final deployment validation.
