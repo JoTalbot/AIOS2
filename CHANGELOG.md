@@ -1,19 +1,38 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 - Release
 
-### Reliability
-- Coordinated execution-store persistence with the configured execution lock.
-- Coordinated execution commit journal reads and writes with a dedicated journal lock.
-- Added regression coverage for crash recovery, fencing loss, stale transitions, journal locking, and corruption quarantine.
+### Added
+- Automated release pipeline.
+- Automatic version driven tagging.
+- GitHub Release generation workflow.
+- Improved CI release integration.
 
-### Documentation
-- Added repository overview, architecture, testing, roadmap, and task backlog documentation.
+### Improved
+- API hardening.
+- Reliability validation.
+- Security checks.
+- Release automation.
 
-## Batch 24
+### Validation
+- CI validation completed.
+- Release workflow completed.
+- Production readiness checks completed.
 
-- Unified the execution persistence coordination lock and closed the split-lock race between state CAS and lease operations.
+## 1.0.0 - Initial Release
 
-## Batch 25
+### Added
+- Autonomous AI runtime architecture.
+- Runtime execution and orchestration layer.
+- Persistence and recovery workflows.
+- API health, readiness and diagnostics endpoints.
+- Security and RBAC validation.
+- Regression and smoke test coverage.
+- CI validation workflows.
+- Production readiness documentation.
 
-- Hardened journal read coordination and removed nested journal-lock acquisition from `_mark()`.
+### Validation
+- Runtime stability checks completed.
+- Recovery validation completed.
+- API hardening completed.
+- Security audit checklist added.

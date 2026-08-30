@@ -1,0 +1,73 @@
+name: AIOS2 Automatic Version Release
+
+on:
+  workflow_run:
+    workflows:
+      - "AIOS2 CI"
+      - "AIOS2 Automatic Semantic Version Bump"
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aios2-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Read and validate version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid VERSION: $VERSION" >&2
+            exit 1
+          fi
+          echo "version=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check existing tag
+        id: tag
+        shell: bash
+        run: |
+          if git rev-parse "refs/tags/${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build release notes
+        if: steps.tag.outputs.exists == 'false'
+        run: |
+          git log -20 --pretty=format:'- %s (%h)' > RELEASE_NOTES.md
+
+      - name: Create tag
+        if: steps.tag.outputs.exists == 'false'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -a "${{ steps.version.outputs.version }}" -m "AIOS2 ${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.version }}"
+
+      - name: Create GitHub Release
+        if: steps.tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

@@ -1,0 +1,33 @@
+name: AIOS2 Release Health Check
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_FILE="$(tr -d '[:space:]' < VERSION)"
+          RELEASE_VERSION="${GITHUB_REF_NAME#v}"
+          test "$VERSION_FILE" = "$RELEASE_VERSION"
+          echo "Version OK: v$VERSION_FILE"
+
+      - name: Release summary
+        run: |
+          echo "AIOS2 release validation passed"
+          echo "Tag: ${{ github.event.release.tag_name }}"
+          echo "Commit: ${{ github.sha }}"

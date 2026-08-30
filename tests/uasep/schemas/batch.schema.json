@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JoTalbot/UASEP/schemas/batch.schema.json",
+  "title": "UASEP Batch Manifest",
+  "type": "object",
+  "required": ["batch_id", "objective", "tasks", "analysis_status", "execution_groups", "verification_plan", "owner"],
+  "properties": {
+    "batch_id": {"type": "string", "minLength": 1},
+    "objective": {"type": "string", "minLength": 1},
+    "tasks": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "analysis_status": {"enum": ["READY", "IN_PROGRESS", "COMPLETE", "BLOCKED", "UNKNOWN"]},
+    "execution_groups": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+    "verification_plan": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "owner": {"type": "string", "minLength": 1},
+    "summary": {"type": "string"}
+  },
+  "additionalProperties": false
+}

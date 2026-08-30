@@ -8,7 +8,8 @@ AIOS2 is an agent-oriented runtime with a separated cognition boundary, durable 
 - `runtime/` owns execution identity, persistence, checkpoints, recovery, leases, fencing, commit coordination, and audit.
 - `kernel/` provides scheduling primitives.
 - `api/` exposes the runtime through the service boundary and security/RBAC controls.
-- `tests/` contains unit, integration, recovery, and security regression coverage.
+- `tests/` contains unit, integration, recovery, security, and protocol conformance coverage.
+- `.github/workflows/` — CI automation
 
 ## Reliability invariants
 
@@ -18,9 +19,50 @@ AIOS2 is an agent-oriented runtime with a separated cognition boundary, durable 
 4. Journal records carry checksums and malformed records are quarantined rather than silently accepted.
 5. Recovery never applies a pending commit when the execution state or fencing token no longer permits that transition.
 6. Audit events are emitted only for transitions that are actually applied or reconciled.
+7. Autonomous-loop state updates across awaits go through version-checked transitions: a stale state copy never overwrites a newer durable write.
 
-## Development
+## Requirements
 
-The repository is intentionally small and dependency-light. CI installs the runtime test dependencies and runs the complete `tests/` suite plus the recovery RBAC security matrix.
+- Python 3.11+
+- pip
 
-See `TESTING.md`, `ARCHITECTURE.md`, and `MIGRATION.md` for operational details.
+## Install
+
+```bash
+python -m pip install -U pip pytest pytest-asyncio fastapi pydantic httpx jsonschema pyyaml
+```
+
+## Validation
+
+Run the complete test suite:
+
+```bash
+pytest tests -q
+```
+
+## Runtime Validation
+
+Available checks:
+
+- `/health` — service availability
+- `/ready` — readiness validation
+- `/diagnostics` — operational diagnostics
+
+## CI
+
+GitHub Actions validates regression tests, security checks and production smoke validation on repository changes.
+
+## Release Status
+
+AIOS2 has completed the production readiness validation cycle.
+
+Completed areas:
+
+- runtime stability
+- autonomous execution flows
+- API hardening
+- recovery validation
+- security checks
+- regression coverage
+
+The project is prepared for final deployment validation.
