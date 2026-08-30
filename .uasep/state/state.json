@@ -4,8 +4,10 @@
   "project_state": "ACTIVE",
   "environment": "chat + GitHub-connected tools",
   "objective": "Production hardening of the AIOS2 autonomous runtime: execution/recovery durability, API hardening, and release automation.",
-  "active_task": null,
-  "active_tasks": [],
+  "active_task": "AIOS2-RUNTIME-002-2026-08-30",
+  "active_tasks": [
+    "AIOS2-RUNTIME-002-2026-08-30"
+  ],
   "last_verified": "2026-08-30",
   "next_best_actions": [
     "AIOS2-RUNTIME-002: integrate the verified-unmerged hardening batches (26 quarantine coordination → 27 durability fencing → 28 lease durability → 29 lease hardening); merge each only after green CI.",

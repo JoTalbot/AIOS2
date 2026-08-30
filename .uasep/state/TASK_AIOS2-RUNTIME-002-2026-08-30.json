@@ -1,0 +1,38 @@
+{
+  "id": "AIOS2-RUNTIME-002-2026-08-30",
+  "objective": "Integrate the open PR queue of unmerged hardening work (PRs #32-#48, #90, #91, #86, #87, #89 and unPR'd batch/28-lease-durability), plus release-pipeline double-release fix and data-file tracking policy.",
+  "owner": "arena-ai-coding-agent",
+  "branch": "main (sequential PR merges per repository convention)",
+  "write_set": [
+    "runtime/",
+    "tests/",
+    "docs/",
+    ".github/workflows/",
+    ".uasep/",
+    ".gitignore"
+  ],
+  "dependencies": [
+    "AIOS2-BATCH30-2026-08-30"
+  ],
+  "conflicts": [],
+  "acceptance": [
+    "Every integration PR is merged only after green CI (merge commits, repository convention)",
+    "Full local suite (including new tests from merged branches) green before each push",
+    "Superseded PRs are closed with verification evidence (content included via merged work)",
+    "The workflow_run double-release quirk is fixed or documented with a decision",
+    "data/*.jsonl tracking policy decided and applied",
+    "Remaining non-PR branches triaged for unique content",
+    "State records finalized: task DONE, ownership RELEASED, evidence VERIFIED"
+  ],
+  "risk": "MEDIUM",
+  "verification": [
+    "Sequential merges in chronological order with per-merge local full suite + conformance kit",
+    "CI green on every PR before merge",
+    "Post-merge main CI green"
+  ],
+  "status": "IN_PROGRESS",
+  "evidence": [
+    ".uasep/evidence/EV-AIOS2-PRQUEUE-2026-08-30.json"
+  ],
+  "next_action": "Merge PR #32 (batch9/durable-idempotency) first."
+}
