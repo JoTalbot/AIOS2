@@ -1,0 +1,78 @@
+name: scheduler-watchdog
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  watchdog:
+    name: scheduler queue-duration watchdog
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Capture queued-run diagnostics
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p scheduler-watchdog
+          now_epoch=$(date -u +%s)
+          now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          api="https://api.github.com/repos/${REPO}/actions/runs?per_page=100"
+          curl --fail-with-body --silent --show-error \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${api}" > scheduler-watchdog/runs.json
+          python3 - "${now_epoch}" "${now_iso}" <<'PY' | tee scheduler-watchdog/queue-duration.txt
+          import datetime as dt
+          import json
+          import sys
+
+          now_epoch = int(sys.argv[1])
+          now_iso = sys.argv[2]
+          data = json.load(open("scheduler-watchdog/runs.json", encoding="utf-8"))
+          names = {"scheduler-probe", "runner-smoke", "tests", "security", "chaos-matrix"}
+          active = {"queued", "pending", "waiting", "requested", "in_progress"}
+
+          print(f"observed_at={now_iso}")
+          print("workflow|run_id|status|created_at|observed_at|queue_duration_upper_bound_seconds|run_started_at|allocated")
+          for run in data.get("workflow_runs", []):
+              name = run.get("name", "")
+              if name not in names:
+                  continue
+              status = run.get("status", "")
+              if status not in active:
+                  continue
+              created = run.get("created_at")
+              if not created:
+                  continue
+              created_dt = dt.datetime.fromisoformat(created.replace("Z", "+00:00"))
+              created_epoch = created_dt.timestamp()
+              started = run.get("run_started_at")
+              allocated = bool(started)
+              # For queued/pending runs this is an upper bound on time spent
+              # waiting so far. For in_progress it remains the total
+              # creation-to-start latency, while run_started_at is retained.
+              duration = max(0, now_epoch - int(created_epoch))
+              print(
+                  f"{name}|{run.get('id')}|{status}|{created}|{now_iso}|{duration}|"
+                  f"{started or ''}|{str(allocated).lower()}"
+              )
+          PY
+
+          printf 'probe=watchdog-ok\n' | tee scheduler-watchdog/probe.txt
+      - name: Publish queue-duration artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduler-watchdog-${{ github.run_id }}-${{ github.run_attempt }}
+          path: scheduler-watchdog/
+          if-no-files-found: warn

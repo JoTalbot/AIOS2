@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JoTalbot/UASEP/schemas/readiness.schema.json",
+  "title": "UASEP Agent Readiness",
+  "type": "object",
+  "required": [
+    "repository",
+    "branch",
+    "protocol",
+    "protocol_version",
+    "state",
+    "active_tasks",
+    "ownership_conflicts",
+    "blockers",
+    "capabilities",
+    "uasep_runtime"
+  ],
+  "properties": {
+    "repository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "branch": {
+      "type": "string",
+      "minLength": 1
+    },
+    "protocol": {
+      "const": "UASEP"
+    },
+    "protocol_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "state": {
+      "type": "string",
+      "minLength": 1
+    },
+    "active_tasks": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ownership_conflicts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "blockers": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": {
+        "enum": [
+          "available",
+          "unavailable",
+          "restricted",
+          "unknown"
+        ]
+      }
+    },
+    "uasep_runtime": {
+      "const": "NONE",
+      "description": "No UASEP runtime is required or available in this session; NONE is the only allowed value."
+    }
+  },
+  "additionalProperties": false
+}

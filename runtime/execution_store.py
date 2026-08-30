@@ -1,4 +1,5 @@
 """Persistent execution state with process-safe optimistic CAS."""
+from .paths import data_path
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json, os
@@ -26,7 +27,8 @@ class _FileLock:
         if fcntl is not None: fcntl.flock(self.handle.fileno(),fcntl.LOCK_UN)
         self.handle.close()
 class ExecutionStore:
-    def __init__(self,path="data/executions.json",state_machine=None,audit_log=None,coordination_lock_path=None):
+    def __init__(self,path=None,state_machine=None,audit_log=None,coordination_lock_path=None):
+        path = path or data_path("executions.json")
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True); self.lock_path=self.path.with_suffix(self.path.suffix+".lock"); self.coordination_lock_path=Path(coordination_lock_path) if coordination_lock_path else None; self.state_machine=state_machine or ExecutionStateMachine(); self.audit_log=audit_log
         if not self.path.exists():
             with self.execution_lock():
@@ -38,11 +40,19 @@ class ExecutionStore:
         except json.JSONDecodeError as exc:raise ExecutionStoreCorruptionError(f"execution store contains invalid JSON: {self.path}") from exc
         if not isinstance(data,dict):raise ExecutionStoreCorruptionError(f"execution store root must be an object: {self.path}")
         return data
+    def _fsync_parent_directory(self):
+        if os.name == "nt": return
+        try:
+            fd=os.open(self.path.parent,os.O_RDONLY)
+            try: os.fsync(fd)
+            finally: os.close(fd)
+        except OSError: pass
     def _write(self,data):
         tmp=self.path.with_suffix(self.path.suffix+".tmp")
         try:
             with tmp.open("w",encoding="utf-8") as h:json.dump(data,h,ensure_ascii=False,default=str,indent=2);h.flush();os.fsync(h.fileno())
             tmp.replace(self.path)
+            self._fsync_parent_directory()
         finally:
             if tmp.exists():
                 try:tmp.unlink()

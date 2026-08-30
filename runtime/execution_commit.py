@@ -1,4 +1,5 @@
 """Crash-recoverable execution commit protocol with an integrity-protected journal."""
+from .paths import data_path
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hashlib, json, os
@@ -25,7 +26,9 @@ class _JournalLock:
         if fcntl is not None:fcntl.flock(self.handle.fileno(),fcntl.LOCK_UN)
         self.handle.close()
 class ExecutionCommitCoordinator:
-    def __init__(self,store,audit_log,journal_path="data/execution_commits.jsonl",quarantine_path="data/execution_commits.quarantine.jsonl",lease_store=None,lease_owner_id=None,fencing_token=None):
+    def __init__(self,store,audit_log,journal_path=None,quarantine_path=None,lease_store=None,lease_owner_id=None,fencing_token=None):
+        journal_path = journal_path or data_path("execution_commits.jsonl")
+        quarantine_path = quarantine_path or data_path("execution_commits.quarantine.jsonl")
         self.store=store;self.audit_log=audit_log;self.journal_path=Path(journal_path);self.quarantine_path=Path(quarantine_path);self.lease_store=lease_store;self.lease_owner_id=lease_owner_id;self.fencing_token=fencing_token;self.journal_path.parent.mkdir(parents=True,exist_ok=True);self.lock_path=self.journal_path.with_suffix(self.journal_path.suffix+".lock")
         if self.lease_store is not None:self.lease_store.lock_path=self.store.coordination_lock_path or self.store.lock_path
     def _next_sequence_unlocked(self):

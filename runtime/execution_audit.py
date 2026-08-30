@@ -1,4 +1,5 @@
 """Structured and persistent audit trail for vNext execution lifecycle."""
+from .paths import data_path
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hashlib, json, os
@@ -27,17 +28,24 @@ class ExecutionAudit:
         return self.log.append(ExecutionAuditEvent(execution_id,from_status,to_status,attempt,reason,correlation_id=correlation_id)) if self.log else None
     def load(self, execution_id=None): return self.log.events(execution_id) if self.log else []
 class ExecutionAuditLog:
-    def __init__(self,path="data/execution_audit.jsonl"):
+    def __init__(self,path=None):
+        path = path or data_path("execution_audit.jsonl")
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True); self.lock_path=self.path.with_suffix(self.path.suffix+".lock")
+    def _read_events_unlocked(self, execution_id=None):
+        if not self.path.exists(): return []
+        result=[]
+        for line in self.path.read_text(encoding="utf-8").splitlines():
+            if not line.strip(): continue
+            raw=json.loads(line)
+            if execution_id is None or raw.get("execution_id")==execution_id: result.append(ExecutionAuditEvent(**raw))
+        return result
     def append(self,event):
         event=event.with_identity(); self.lock_path.touch(exist_ok=True)
         with self.lock_path.open("r+",encoding="utf-8") as lock:
             if fcntl is not None: fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
             try:
-                if self.path.exists():
-                    for line in self.path.read_text(encoding="utf-8").splitlines():
-                        if line.strip() and json.loads(line).get("event_id") == event.event_id:
-                            return ExecutionAuditEvent(**json.loads(line))
+                for existing in self._read_events_unlocked():
+                    if existing.event_id == event.event_id: return existing
                 with self.path.open("a",encoding="utf-8") as h:
                     h.write(json.dumps(asdict(event),ensure_ascii=False)+"\n"); h.flush(); os.fsync(h.fileno())
                 return event
@@ -47,9 +55,9 @@ class ExecutionAuditLog:
         if not self.path.exists(): return []
         self.lock_path.touch(exist_ok=True)
         with self.lock_path.open("r+",encoding="utf-8") as lock:
+            # Readers take a SHARED lock: concurrent audit reads are safe,
+            # while appends stay exclusive.
             if fcntl is not None: fcntl.flock(lock.fileno(),fcntl.LOCK_SH)
-            try:
-                lines=self.path.read_text(encoding="utf-8").splitlines()
-                return [ExecutionAuditEvent(**json.loads(line)) for line in lines if line.strip() and (execution_id is None or json.loads(line).get("execution_id")==execution_id)]
+            try: return self._read_events_unlocked(execution_id)
             finally:
                 if fcntl is not None: fcntl.flock(lock.fileno(),fcntl.LOCK_UN)

@@ -1,0 +1,18 @@
+{
+  "evidence_id": "EV-AIOS2-BASELINE-2026-08-30",
+  "task_id": "AIOS2-UASEP-ADOPT-2026-08-30",
+  "timestamp": "2026-08-30T07:40:00Z",
+  "agent": "arena-ai-coding-agent",
+  "operation": "Baseline verification of AIOS2 main before UASEP v3.4.0 adoption",
+  "scope": "tests/ (full suite), main @ 97e2edf",
+  "result": "VERIFIED",
+  "source": "local run: python -m pytest tests -q",
+  "observed": "232 passed, 2 warnings, 3.43s on main @ 97e2edf (v1.7.0). Deps installed per requirements.txt: fastapi, uvicorn[standard], pydantic, httpx, pytest, pytest-asyncio.",
+  "commit": "97e2edf",
+  "changed_files": [],
+  "verification": "Full suite green before any adoption changes; establishes the regression baseline for the adoption task.",
+  "limitations": [
+    "Local run only; GitHub Actions CI remains the canonical validation for PRs."
+  ],
+  "related": []
+}
