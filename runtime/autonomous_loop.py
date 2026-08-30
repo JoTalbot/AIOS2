@@ -76,32 +76,41 @@ class AutonomousExecutionLoop:
         return LoopResult("failed", attempts=self.policy.max_attempts)
 
     def _transition(self, state, status, **updates):
+        if self.store:
+            # Version-checked update: a stale copy of the state (changed by
+            # another worker while this loop awaited) is rejected instead of
+            # silently overwriting the newer write.
+            updated = self.store.transition(state.execution_id, status, **updates)
+            state.status, state.version = updated.status, updated.version
+            state.result, state.error = updated.result, updated.error
+            state.plan, state.attempt = updated.plan, updated.attempt
+            return updated
         state.status = status
         for key, value in updates.items():
             setattr(state, key, value)
-        if self.store:
-            self.store.save(state)
+        return state
 
     def _checkpoint_running(self, state, attempt, plan):
-        state.attempt, state.plan = attempt, plan
         if self.checkpoint:
+            state.attempt, state.plan = attempt, plan
             self.checkpoint.mark_running(state, attempt, plan)
         elif self.store:
-            self.store.save(state)
+            updated = self.store.transition(state.execution_id, "running", attempt=attempt, plan=plan)
+            state.attempt, state.plan, state.version = updated.attempt, updated.plan, updated.version
 
     def _checkpoint_completed(self, state, result):
         if self.checkpoint:
             self.checkpoint.mark_completed(state, result)
         elif self.store:
-            state.status, state.result, state.error = "completed", result, None
-            self.store.save(state)
+            updated = self.store.transition(state.execution_id, "completed", result=result, error=None)
+            state.status, state.result, state.error, state.version = updated.status, updated.result, updated.error, updated.version
 
     def _checkpoint_failed(self, state, error):
         if self.checkpoint:
             self.checkpoint.mark_failed(state, error)
         elif self.store:
-            state.status, state.error = "failed", str(error)
-            self.store.save(state)
+            updated = self.store.transition(state.execution_id, "failed", error=str(error))
+            state.status, state.error, state.version = updated.status, updated.error, updated.version
 
     async def _publish(self, event_type, context, data):
         if self.event_bus:
