@@ -53,4 +53,8 @@ async def test_stale_resume_cannot_persist_failure_after_lease_is_fenced(tmp_pat
 
     assert report.failed == 1
     assert store.get(state.execution_id).status == "running"
-    assert leases.is_owner("e1", "node-b") is True
+    # Fail-closed recovery releases the execution lease once the fenced
+    # failure is handled: neither worker keeps a stale claim on "e1",
+    # so the next recovery attempt can claim it fresh.
+    assert leases.is_owner("e1", "node-a") is False
+    assert leases.is_owner("e1", "node-b") is False
