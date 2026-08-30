@@ -1,4 +1,5 @@
 """Durable, idempotent journal for recovery reconciliation intents."""
+from .paths import data_path
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 import json, os
@@ -19,7 +20,8 @@ class ReconciliationRecord:
     schema_version: int = SCHEMA_VERSION
 
 class ReconciliationJournal:
-    def __init__(self, path="data/reconciliation_journal.json"):
+    def __init__(self, path=None):
+        path = path or data_path("reconciliation_journal.json")
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True); self.lock_path=self.path.with_suffix(self.path.suffix+".lock")
         if not self.path.exists():
             with self._lock():

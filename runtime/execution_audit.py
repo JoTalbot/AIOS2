@@ -1,4 +1,5 @@
 """Structured and persistent audit trail for vNext execution lifecycle."""
+from .paths import data_path
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hashlib, json, os
@@ -27,7 +28,8 @@ class ExecutionAudit:
         return self.log.append(ExecutionAuditEvent(execution_id,from_status,to_status,attempt,reason,correlation_id=correlation_id)) if self.log else None
     def load(self, execution_id=None): return self.log.events(execution_id) if self.log else []
 class ExecutionAuditLog:
-    def __init__(self,path="data/execution_audit.jsonl"):
+    def __init__(self,path=None):
+        path = path or data_path("execution_audit.jsonl")
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True); self.lock_path=self.path.with_suffix(self.path.suffix+".lock")
     def append(self,event):
         event=event.with_identity(); self.lock_path.touch(exist_ok=True)

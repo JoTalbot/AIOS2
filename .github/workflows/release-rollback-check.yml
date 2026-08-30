@@ -1,0 +1,44 @@
+name: AIOS2 Release Rollback Check
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  verify-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Verify release integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION=$(tr -d '[:space:]' < VERSION)
+
+          if [[ "v$VERSION" != "$TAG" ]]; then
+            echo "Version mismatch: VERSION=$VERSION TAG=$TAG"
+            exit 1
+          fi
+
+          echo "Release verification passed: $TAG"
+
+      - name: Mark failed release
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: context.payload.release.id,
+              draft: true
+            })

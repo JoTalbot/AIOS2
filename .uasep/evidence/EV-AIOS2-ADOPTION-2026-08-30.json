@@ -1,0 +1,32 @@
+{
+  "evidence_id": "EV-AIOS2-ADOPTION-2026-08-30",
+  "task_id": "AIOS2-UASEP-ADOPT-2026-08-30",
+  "timestamp": "2026-08-30T08:10:00Z",
+  "agent": "arena-ai-coding-agent",
+  "operation": "Adopt UASEP v3.4.0 in AIOS2: durable artifact tree, AGENTS.md contract, skills port, legacy .agents retirement",
+  "scope": "AGENTS.md, .uasep/, skills/, protocol/README.md, docs/UASEP_INTEGRATION.md, .agents/ (removed)",
+  "result": "PARTIALLY_VERIFIED",
+  "source": "local pytest run, jsonschema validation against UASEP 3.4.0 schemas, git history inspection",
+  "observed": "Created the full UASEP v3.4.0 artifact tree (manifest, state incl. task contract and ownership lease, planning, knowledge incl. adoption findings, evidence, decisions ADR-0001/0002), ported four skills from .agents/skills, added project-specific protocol/README.md norms, rewrote AGENTS.md as the v3.4.0 contract, retired the legacy .agents/ directory (content migrated). Rebuilt durable state from git facts after discovering the legacy status described merged batch-25 work as current. state.json, task, ownership, and both evidence records validate against the UASEP 3.4.0 JSON schemas (jsonschema Draft 2020-12). Full test suite after adoption: 232 passed (identical to the pre-adoption baseline). GitHub Actions CI on the adoption PR: pending at recording time.",
+  "commit": null,
+  "changed_files": [
+    "AGENTS.md",
+    ".uasep/manifest.yaml",
+    ".uasep/state/",
+    ".uasep/planning/",
+    ".uasep/knowledge/",
+    ".uasep/evidence/",
+    ".uasep/decisions/",
+    "skills/",
+    "protocol/README.md",
+    "docs/UASEP_INTEGRATION.md",
+    ".agents/ (removed)"
+  ],
+  "verification": "python -m pytest tests -q: 232 passed after adoption (baseline 232 passed). jsonschema validation of all machine-readable records: PASS. CI on PR: pending.",
+  "limitations": [
+    "GitHub Actions CI on the adoption PR had not completed when this record was written"
+  ],
+  "related": [
+    "EV-AIOS2-BASELINE-2026-08-30.json"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "id": "AIOS2-UASEP-ADOPT-2026-08-30",
+  "objective": "Adopt the UASEP v3.4.0 protocol layer in AIOS2, migrating the legacy .agents/ v1.0 system into canonical durable artifacts.",
+  "owner": "arena-ai-coding-agent",
+  "branch": "uasep/adopt-v3.4.0",
+  "write_set": [
+    "AGENTS.md",
+    ".uasep/",
+    "skills/",
+    "protocol/README.md",
+    "docs/UASEP_INTEGRATION.md",
+    ".agents/"
+  ],
+  "dependencies": [],
+  "conflicts": [],
+  "acceptance": [
+    "Required UASEP durable artifacts exist (state, planning, knowledge, evidence, decisions, manifest)",
+    "Machine-readable artifacts validate against the UASEP 3.4.0 JSON schemas",
+    "Legacy .agents/ content is migrated, not lost, and the directory is retired",
+    "The full AIOS2 test suite still passes after the change",
+    "CI is green on the adoption PR before merge",
+    "Stale status (batch-25 recorded as current) is corrected from factual git history"
+  ],
+  "risk": "LOW",
+  "verification": [
+    "python -m pytest tests -q before and after adoption (232 passed baseline)",
+    "jsonschema validation of state.json, task, ownership, and evidence records against UASEP 3.4.0 schemas",
+    "GitHub Actions CI on the adoption PR"
+  ],
+  "status": "IN_PROGRESS",
+  "evidence": [
+    ".uasep/evidence/EV-AIOS2-BASELINE-2026-08-30.json",
+    ".uasep/evidence/EV-AIOS2-ADOPTION-2026-08-30.json"
+  ],
+  "next_action": "Commit the adoption package, open the PR, and merge after CI is green."
+}
