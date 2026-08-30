@@ -1,0 +1,14 @@
+services:
+  aios2:
+    build: .
+    container_name: aios2
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      AIOS_OPERATOR_TOKEN: ${AIOS_OPERATOR_TOKEN:-change-me}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -4,6 +4,7 @@ from runtime.tool_executor import ToolExecutor
 from runtime.tool_idempotency_store import ToolIdempotencyStore
 from runtime.tool_intent_store import ToolIntent, ToolIntentStore
 from runtime.tool_protocol import ToolResult
+from runtime.tool_sandbox import ToolExecutionContext
 
 
 class ExplodingSandbox:
@@ -17,7 +18,7 @@ async def test_failed_side_effect_becomes_ambiguous(tmp_path):
     executor = ToolExecutor(ExplodingSandbox(), intent_store=intents)
     from runtime.tool_protocol import ToolCall
     call = ToolCall("remote_write", {"value": 1}, "c1", idempotency_key="e1:s1")
-    result = await executor.execute(call, type("C", (), {"agent_id": "a"})())
+    result = await executor.execute(call, ToolExecutionContext("a"))
     assert not result.ok
     assert intents.get("e1:s1").state == "ambiguous"
 

@@ -1,0 +1,19 @@
+protocol: UASEP
+protocol_version: 3.5.0
+project_instance: AIOS2
+project_state: ACTIVE
+autonomy_level: L3
+source_of_truth: repository
+uasep_runtime: NONE
+project_runtime: "AIOS2 autonomous agent runtime (kernel/runtime/cognition/api, FastAPI + uvicorn)"
+project:
+  validation:
+    ci: github-actions
+    required: true
+    suites: [tests, security-rbac-matrix, production-smoke]
+  execution:
+    current_focus: test hygiene and protocol v3.5.0 alignment
+  rules:
+    one_canonical_execution_path: true
+    regression_tests_for_public_contracts: true
+    adr_for_architectural_changes: true

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JoTalbot/UASEP/schemas/capabilities.schema.json",
+  "title": "UASEP Capabilities",
+  "type": "object",
+  "required": ["environment", "capabilities"],
+  "properties": {
+    "environment": {"type": "string", "minLength": 1},
+    "agent": {"type": "string"},
+    "capabilities": {"type": "object", "additionalProperties": {"enum": ["available", "unavailable", "restricted", "unknown"]}},
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "evidence": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

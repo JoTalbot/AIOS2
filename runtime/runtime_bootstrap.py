@@ -1,13 +1,14 @@
 """Startup orchestration for restart-safe AIOS runtime recovery."""
 import asyncio
+import inspect
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
-from .execution_commit import ExecutionCommitCoordinator
-from .execution_lease import ExecutionLeaseStore
 from .execution_store import ExecutionStore
 from .recovery_manager import RecoveryManager
 from .recovery_policy import RecoveryAction, RecoveryPolicy
 from .recovery_queue import RecoveryQueue, RecoveryQueueItem
+from .execution_lease import ExecutionLeaseStore
+
 
 @dataclass(frozen=True)
 class RecoveryReport:
@@ -22,25 +23,85 @@ class RecoveryReport:
     quarantined: int = 0
     manual_review: int = 0
 
+
 class RuntimeBootstrap:
-    def __init__(self, store=None, recovery_manager=None, lease_store=None, owner_id="aios-runtime", heartbeat_interval=None, commit_coordinator=None, recovery_policy=None, recovery_queue=None):
+    def __init__(
+        self,
+        store=None,
+        recovery_manager=None,
+        lease_store=None,
+        owner_id="aios-runtime",
+        heartbeat_interval=None,
+        commit_coordinator=None,
+        recovery_policy=None,
+        recovery_queue=None,
+    ):
         self.store = store or ExecutionStore()
         self.recovery_manager = recovery_manager or RecoveryManager(self.store)
         self.lease_store = lease_store or ExecutionLeaseStore()
         self.owner_id = owner_id
-        self.heartbeat_interval = heartbeat_interval if heartbeat_interval is not None else max(0.1, self.lease_store.ttl_seconds / 3)
+        self.heartbeat_interval = (
+            heartbeat_interval
+            if heartbeat_interval is not None
+            else max(0.1, self.lease_store.ttl_seconds / 3)
+        )
         self.commit_coordinator = commit_coordinator
         self.recovery_policy = recovery_policy or RecoveryPolicy()
         self.recovery_queue = recovery_queue or RecoveryQueue()
 
-    async def _heartbeat(self, execution_id, fencing_token):
+    async def _heartbeat(self, execution_id, fencing_token=None):
         while True:
             await asyncio.sleep(self.heartbeat_interval)
-            renewed = self.lease_store.renew(execution_id, self.owner_id)
+            renewed = (
+                self.lease_store.renew(execution_id, self.owner_id, fencing_token)
+                if fencing_token is not None
+                else self.lease_store.renew(execution_id, self.owner_id)
+            )
             if renewed is None:
                 raise RuntimeError(f"execution lease lost: {execution_id}")
-            if not self.lease_store.is_owner(execution_id, self.owner_id, fencing_token):
+            if fencing_token is not None and not self.lease_store.is_owner(
+                execution_id, self.owner_id, fencing_token
+            ):
                 raise RuntimeError(f"execution lease fenced: {execution_id}")
+
+    async def _run_with_heartbeat(self, result, execution_id, fencing_token):
+        """Run recovery while making heartbeat loss fail closed."""
+        if not inspect.isawaitable(result):
+            if fencing_token is not None and not self.lease_store.is_owner(
+                execution_id, self.owner_id, fencing_token
+            ):
+                raise RuntimeError(f"execution lease fenced: {execution_id}")
+            return
+
+        resume_task = asyncio.create_task(result)
+        heartbeat = asyncio.create_task(self._heartbeat(execution_id, fencing_token))
+        done, _ = await asyncio.wait(
+            {resume_task, heartbeat}, return_when=asyncio.FIRST_COMPLETED
+        )
+
+        if heartbeat in done:
+            try:
+                heartbeat.result()
+            except BaseException:
+                resume_task.cancel()
+                try:
+                    await resume_task
+                except asyncio.CancelledError:
+                    pass
+                raise
+
+        try:
+            await resume_task
+            if fencing_token is not None and not self.lease_store.is_owner(
+                execution_id, self.owner_id, fencing_token
+            ):
+                raise RuntimeError(f"execution lease fenced: {execution_id}")
+        finally:
+            heartbeat.cancel()
+            try:
+                await heartbeat
+            except asyncio.CancelledError:
+                pass
 
     def _reconcile(self):
         if self.commit_coordinator is None:
@@ -55,11 +116,16 @@ class RuntimeBootstrap:
         pending = self.store.resumable()
         recovered = failed = skipped = retried = quarantined = manual_review = 0
         for state in pending:
-            decision = self.recovery_policy.decide(state.execution_id, state.status, state.attempt)
+            decision = self.recovery_policy.decide(
+                state.execution_id, state.status, state.attempt
+            )
             if decision.action is RecoveryAction.SKIP:
                 skipped += 1
                 continue
-            if decision.action in {RecoveryAction.QUARANTINE, RecoveryAction.MANUAL_REVIEW}:
+            if decision.action in {
+                RecoveryAction.QUARANTINE,
+                RecoveryAction.MANUAL_REVIEW,
+            }:
                 self.recovery_queue.enqueue(
                     RecoveryQueueItem(
                         state.execution_id,
@@ -78,32 +144,39 @@ class RuntimeBootstrap:
             if lease is None:
                 skipped += 1
                 continue
-            heartbeat = asyncio.create_task(self._heartbeat(state.execution_id, lease.fencing_token))
+            fencing_token = getattr(lease, "fencing_token", None)
             try:
-                if not self.lease_store.is_owner(state.execution_id, self.owner_id, lease.fencing_token):
+                if fencing_token is not None and not self.lease_store.is_owner(
+                    state.execution_id, self.owner_id, fencing_token
+                ):
                     skipped += 1
                     continue
-                await resume(state)
-                # A successful resume must also be fenced. A worker that lost
-                # ownership must never report or persist a successful recovery.
-                if not self.lease_store.is_owner(state.execution_id, self.owner_id, lease.fencing_token):
-                    skipped += 1
-                    continue
+                result = resume(state)
+                await self._run_with_heartbeat(
+                    result, state.execution_id, fencing_token
+                )
                 recovered += 1
             except Exception as exc:
                 failed += 1
-                # Never persist a failure from a stale/fenced worker.
                 self.recovery_manager.mark_failed(state, exc, lease=lease)
             finally:
-                heartbeat.cancel()
-                try:
-                    await heartbeat
-                except asyncio.CancelledError:
-                    pass
-                self.lease_store.release(state.execution_id, self.owner_id, lease.fencing_token)
+                if fencing_token is not None:
+                    self.lease_store.release(
+                        state.execution_id, self.owner_id, fencing_token
+                    )
+                else:
+                    self.lease_store.release(state.execution_id, self.owner_id)
         return RecoveryReport(
-            len(pending), retried, recovered, failed, skipped,
-            reconciled, reconciliation_failed, retried, quarantined, manual_review,
+            len(pending),
+            retried,
+            recovered,
+            failed,
+            skipped,
+            reconciled,
+            reconciliation_failed,
+            retried,
+            quarantined,
+            manual_review,
         )
 
     async def recover_with_loop(self, loop, agent, context=None):

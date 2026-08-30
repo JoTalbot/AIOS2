@@ -21,9 +21,7 @@ DEFAULT_TRANSITIONS: dict[str, FrozenSet[str]] = {
 class ExecutionStateMachine:
     """Validate execution lifecycle transitions from one canonical state graph."""
 
-    transitions: Mapping[str, FrozenSet[str]] = field(
-        default_factory=lambda: DEFAULT_TRANSITIONS.copy()
-    )
+    transitions: Mapping[str, FrozenSet[str]] = field(default_factory=lambda: DEFAULT_TRANSITIONS.copy())
 
     def __post_init__(self):
         normalized = {
@@ -32,10 +30,16 @@ class ExecutionStateMachine:
         }
         states = set(normalized)
         unknown_targets = {
-            target for targets in normalized.values() for target in targets if target not in states
+            target
+            for targets in normalized.values()
+            for target in targets
+            if target not in states and target not in DEFAULT_TRANSITIONS
         }
         if unknown_targets:
             raise ValueError(f"transitions reference unknown states: {sorted(unknown_targets)}")
+        # Canonical terminal states may be referenced without outgoing edges.
+        for target in {target for targets in normalized.values() for target in targets}:
+            normalized.setdefault(target, DEFAULT_TRANSITIONS.get(target, frozenset()))
         object.__setattr__(self, "transitions", normalized)
 
     @property
