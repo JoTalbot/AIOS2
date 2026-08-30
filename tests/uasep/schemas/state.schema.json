@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JoTalbot/UASEP/schemas/state.schema.json",
+  "title": "UASEP Durable State",
+  "type": "object",
+  "required": ["protocol", "protocol_version", "project_state"],
+  "properties": {
+    "protocol": {"const": "UASEP"},
+    "protocol_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "project_state": {"enum": ["INITIALIZING", "ACTIVE", "PAUSED", "BLOCKED", "HANDOFF", "RECOVERING", "COMPLETE", "MAINTENANCE", "ADOPTED"]},
+    "environment": {"type": "string"},
+    "objective": {"type": "string"},
+    "active_task": {"type": ["string", "null"]},
+    "last_verified": {"type": ["string", "null"]},
+    "next_best_actions": {"type": "array", "items": {"type": "string"}},
+    "active_tasks": {"type": "array", "items": {"type": "string"}},
+    "blockers": {"type": "array", "items": {"type": "string"}},
+    "unknowns": {"type": "array", "items": {"type": "string"}},
+    "evidence": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}
