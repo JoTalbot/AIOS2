@@ -12,7 +12,7 @@ Production hardening of the AIOS2 autonomous runtime: execution/recovery durabil
 
 ## Current task
 
-- ID: AIOS2-RUNTIME-002-2026-08-30
+- ID: NONE
 - Owner: NONE
 - Scope: next backlog item (batch 26-29 verification recommended)
 

@@ -11,9 +11,9 @@
     ".gitignore"
   ],
   "claim_time": "2026-08-30 UTC",
-  "expected_completion": "Same session: all queue PRs merged or dispositioned",
-  "status": "ACTIVE",
+  "expected_completion": "Completed 2026-08-30.",
+  "status": "RELEASED",
   "last_refresh": "2026-08-30 UTC",
   "transfer_to": null,
-  "release_reason": null
+  "release_reason": "Campaign complete: 12 PRs merged after green CI, 4 closed superseded, 43 stale branches deleted, hygiene landed."
 }

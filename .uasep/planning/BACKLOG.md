@@ -7,7 +7,7 @@ Priority is dynamic. Re-score using user value, dependency readiness, risk, reve
 
 ## P1 — Runtime hardening
 - [x] AIOS2-RUNTIME-001: Verify whether batch 26–29 branch content is fully included in `main`. — VERIFIED (batch 30): batch/27-recovery-quarantine-determinism is in `main`; batches 26 (quarantine coordination), 27-durability-fencing, 28 (lease durability), 29 (lease hardening) are NOT — their regression tests exist only on branches. Evidence: EV-AIOS2-BRANCHHYGIENE-2026-08-30.json
-- [ ] AIOS2-RUNTIME-002: Integrate the verified-unmerged hardening batches (26 quarantine coordination → 27 durability fencing → 28 lease durability → 29 lease hardening); merge each only after green CI. Regression tests already exist on the branches.
+- [x] AIOS2-RUNTIME-002: Integrate the unmerged hardening work. — VERIFIED: the entire open PR queue merged after green CI (12 PRs incl. batches 26-29 and the old queue), 4 PRs closed as superseded with evidence; 293 tests; 43 stale branches deleted. Evidence: EV-AIOS2-PRQUEUE-2026-08-30.json
 - [ ] AIOS2-RUNTIME-003: Unified cognition/runtime boundary review.
 
 ## P2 — Test hygiene
@@ -21,3 +21,5 @@ Priority is dynamic. Re-score using user value, dependency readiness, risk, reve
 ## Completed (reference)
 - [x] Batches 1–25: crash consistency, leases, fencing, CAS transitions, execution commit journal, journal read coordination.
 - [x] Release automation through v1.7.0 (semantic versioning, tag/release pipeline, post-release health, rollback verification).
+
+- [ ] AIOS2-ARCH-001: Decide the fate of the `canonical-execution` branch — a large unlanded architecture initiative (14 ADRs, sqlite/distributed execution repository, persistence protocol, ~30 test files). Needs deliberate integration or archival; not a routine merge.

@@ -1,6 +1,0 @@
-{"action": "manual_review", "execution_id": "exec-1", "actor": "operator-1", "outcome": "resolved", "reason": "reviewed", "correlation_id": "corr-123", "created_at": "2026-08-30T07:38:08.996017+00:00"}
-{"action": "manual_review", "execution_id": "e1", "actor": "alice", "outcome": "resolved", "reason": "approved", "correlation_id": "corr-test", "created_at": "2026-08-30T07:38:10.934395+00:00"}
-{"action": "manual_review", "execution_id": "e1", "actor": "alice", "outcome": "resolved", "reason": "approved", "correlation_id": "corr-test", "created_at": "2026-08-30T07:38:10.943564+00:00"}
-{"action": "manual_review", "execution_id": "exec-1", "actor": "operator-1", "outcome": "resolved", "reason": "reviewed", "correlation_id": "corr-123", "created_at": "2026-08-30T07:44:40.427002+00:00"}
-{"action": "manual_review", "execution_id": "e1", "actor": "alice", "outcome": "resolved", "reason": "approved", "correlation_id": "corr-test", "created_at": "2026-08-30T07:44:42.344125+00:00"}
-{"action": "manual_review", "execution_id": "e1", "actor": "alice", "outcome": "resolved", "reason": "approved", "correlation_id": "corr-test", "created_at": "2026-08-30T07:44:42.355735+00:00"}

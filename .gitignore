@@ -7,3 +7,9 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Runtime journals are operational artifacts, not fixtures: every store
+# creates its files on demand (mkdir parents + append). Tests redirect them
+# via AIOS2_DATA_DIR (tests/conftest.py).
+data/*.jsonl
+data/*.lock

@@ -30,9 +30,9 @@
     "CI green on every PR before merge",
     "Post-merge main CI green"
   ],
-  "status": "IN_PROGRESS",
+  "status": "DONE",
   "evidence": [
     ".uasep/evidence/EV-AIOS2-PRQUEUE-2026-08-30.json"
   ],
-  "next_action": "Merge PR #32 (batch9/durable-idempotency) first."
+  "next_action": "None. Successor candidates: canonical-execution architecture decision, AIOS2-OPS-001 docs consolidation."
 }
