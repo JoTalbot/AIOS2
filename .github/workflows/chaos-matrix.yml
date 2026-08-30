@@ -1,0 +1,30 @@
+name: chaos-matrix
+on:
+  push:
+    branches: [batch/recovery-worker-fencing]
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: iterations per boundary
+        required: false
+        default: '50'
+        type: string
+jobs:
+  chaos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run SIGKILL chaos matrix
+        env:
+          ITERATIONS: ${{ inputs.iterations || '50' }}
+        run: python tests/chaos_matrix.py --iterations "$ITERATIONS" --output chaos-matrix.json
+      - name: Upload chaos statistics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-matrix-statistics
+          path: chaos-matrix.json

@@ -1,4 +1,5 @@
 """Atomic file-backed execution lease with fencing tokens."""
+from .paths import data_path
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json, os
@@ -19,7 +20,8 @@ class _LeaseLock:
         if fcntl is not None: fcntl.flock(self.handle.fileno(),fcntl.LOCK_UN)
         self.handle.close()
 class ExecutionLeaseStore:
-    def __init__(self,path="data/execution_leases.json",ttl_seconds=60,coordination_lock_path=None):
+    def __init__(self,path=None,ttl_seconds=60,coordination_lock_path=None):
+        path = path or data_path("execution_leases.json")
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True); self.ttl_seconds=max(1,ttl_seconds); self.lock_path=Path(coordination_lock_path) if coordination_lock_path else self.path.with_suffix(self.path.suffix+".lock")
         if not self.path.exists():
             with self.execution_lock():

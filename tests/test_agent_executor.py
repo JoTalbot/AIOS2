@@ -5,6 +5,7 @@ from runtime.agent_executor import AgentExecutor
 from runtime.execution_audit import ExecutionAudit
 from runtime.tool_registry import ToolRegistry
 from runtime.tool_sandbox import ToolSandbox
+from runtime.tool_protocol import ToolCall
 from runtime.vnext_orchestrator import VNextOrchestrator
 
 
@@ -60,3 +61,15 @@ async def test_context_cannot_self_grant_unauthorized_permissions():
 
     assert result[0].ok is False
     assert "requires permissions" in (result[0].error or "")
+
+
+@pytest.mark.asyncio
+async def test_registry_preserves_arguments_when_called_with_typed_tool_call():
+    registry = ToolRegistry()
+    registry.register("add", add)
+
+    result = await registry.execute(
+        ToolCall(tool="add", arguments={"a": 4, "b": 6}, call_id="c1")
+    )
+
+    assert result == 10

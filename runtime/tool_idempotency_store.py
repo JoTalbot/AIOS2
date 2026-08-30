@@ -1,4 +1,5 @@
 """Durable idempotency registry for completed tool side effects."""
+from .paths import data_path
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
@@ -39,7 +40,8 @@ class _StoreLock:
 
 
 class ToolIdempotencyStore:
-    def __init__(self, path: str = "data/tool_idempotency.json"):
+    def __init__(self, path: str = None):
+        path = path or data_path("tool_idempotency.json")
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
@@ -64,7 +66,16 @@ class ToolIdempotencyStore:
             data = self._read()
             raw = data.get(result.idempotency_key)
             if raw:
-                return StoredToolResult(**raw)
+                stored = StoredToolResult(**raw)
+                # An idempotency key is bound to its first outcome. A retry may
+                # legitimately carry a new call_id, but the key must never
+                # silently absorb a DIFFERENT tool.
+                if stored.tool != result.tool:
+                    raise ValueError(
+                        "idempotency key already bound to a different tool: "
+                        f"{stored.tool} != {result.tool}"
+                    )
+                return stored
             data[result.idempotency_key] = asdict(result)
             tmp = self.path.with_suffix(self.path.suffix + ".tmp")
             tmp.write_text(json.dumps(data, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
