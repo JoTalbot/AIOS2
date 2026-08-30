@@ -1,31 +1,12 @@
-version: 1
 protocol: UASEP
-protocol_version: 1.0
-project_id: JoTalbot/AIOS2
-project_type: existing
-source_of_truth: github
-branch: main
-phase: production-hardening
-status: active
-runtime:
-  canonical: runtime
-  discovery: external-uasep-bootstrap
-  persistence: runtime
-  recovery: runtime
-validation:
-  ci: github-actions
-  required: true
-  latest_known_green: true
-execution:
-  current_focus: batch-25-journal-read-coordination
-  next_focus:
-    - concurrent corruption and quarantine behavior
-    - operational documentation debt
-    - unified cognition/runtime boundary
-rules:
-  inspect_before_change: true
-  regression_test_public_contracts: true
-  checkpoint_after_material_step: true
-  verify_before_done: true
-  no_force_push: true
-  github_is_source_of_truth: true
+protocol_version: 3.4.0
+project_instance: AIOS2
+project_state: ACTIVE
+autonomy_level: L3
+source_of_truth: repository
+runtime: NONE
+# runtime: NONE describes the UASEP protocol layer: no UASEP runtime is
+# required to operate this repository. AIOS2 itself is an autonomous AI
+# runtime — that is the project's product, not the coordination protocol's
+# runtime. See .uasep/decisions/DECISION-0001 and the adoption findings in
+# .uasep/knowledge/UASEP_ADOPTION_FINDINGS.md.
