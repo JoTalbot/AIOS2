@@ -1,0 +1,26 @@
+{
+  "evidence_id": "EV-AIOS2-UASEP35-2026-08-30",
+  "task_id": "AIOS2-BATCH30-2026-08-30",
+  "timestamp": "2026-08-30T09:32:00Z",
+  "agent": "arena-ai-coding-agent",
+  "operation": "Migrate AIOS2 to UASEP v3.5.0 and adopt the portable conformance kit",
+  "scope": ".uasep/manifest.yaml, .uasep/state/state.json, tests/uasep/, .github/workflows/ci.yml",
+  "result": "VERIFIED",
+  "source": "UASEP v3.5.0 release (tag v3.5.0 on 708e80c), local kit run, CI pending",
+  "observed": "Manifest migrated to protocol 3.5.0: uasep_runtime: NONE (protocol layer) plus the new project_runtime and project extension fields, which let AIOS2 describe its runtime nature and validation requirements honestly. state.json and narratives synchronized to 3.5.0. Conformance kit (tests/uasep/ from UASEP v3.5.0) copied in: 7/7 checks pass locally (manifest/state schema conformance and consistency, required artifacts, task/ownership/evidence schema conformance). CI installs jsonschema+pyyaml so the kit runs on every PR. CI acceptance on this PR pending at recording time.",
+  "commit": "18d9cfd (PR #94, merge commit)",
+  "changed_files": [
+    ".uasep/manifest.yaml",
+    ".uasep/state/state.json",
+    ".uasep/state/STATUS.md",
+    ".uasep/state/PROJECT_STATE.md",
+    ".uasep/state/HANDOFF.md",
+    "tests/uasep/",
+    ".github/workflows/ci.yml"
+  ],
+  "verification": "Local: pytest tests/uasep -q → 7 passed; full suite 239 passed. CI run 33301390739 (PR #94): success, including the kit in the tests job. Post-merge main CI 33301433805: success. Auto-release v1.9.0: 33301457381.",
+  "limitations": [],
+  "related": [
+    "EV-AIOS2-ADOPTION-2026-08-30.json"
+  ]
+}

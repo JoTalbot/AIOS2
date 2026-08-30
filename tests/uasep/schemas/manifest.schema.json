@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JoTalbot/UASEP/schemas/manifest.schema.json",
+  "title": "UASEP Project Manifest",
+  "type": "object",
+  "required": [
+    "protocol",
+    "protocol_version",
+    "project_state",
+    "autonomy_level",
+    "source_of_truth",
+    "uasep_runtime"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "UASEP"
+    },
+    "protocol_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "project_instance": {
+      "type": "string"
+    },
+    "project_state": {
+      "enum": [
+        "INITIALIZING",
+        "ACTIVE",
+        "PAUSED",
+        "BLOCKED",
+        "HANDOFF",
+        "RECOVERING",
+        "COMPLETE",
+        "MAINTENANCE",
+        "ADOPTED"
+      ]
+    },
+    "autonomy_level": {
+      "enum": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6",
+        "L7"
+      ]
+    },
+    "source_of_truth": {
+      "type": "string",
+      "minLength": 1
+    },
+    "local_state": {
+      "type": "string"
+    },
+    "uasep_runtime": {
+      "const": "NONE",
+      "description": "The UASEP protocol layer requires no runtime. NONE is the only allowed value. This says nothing about whether the project itself is or contains a runtime - use project_runtime for that."
+    },
+    "project_runtime": {
+      "type": "string",
+      "description": "Optional free-form description of the project's own runtime nature (for projects whose product is a runtime). Not a UASEP concern."
+    },
+    "project": {
+      "type": "object",
+      "description": "Optional project-specific extension object (validation requirements, execution focus, operative rules, etc.). Uninterpreted by the protocol; the project owns its shape."
+    }
+  },
+  "additionalProperties": false
+}

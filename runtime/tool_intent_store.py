@@ -1,4 +1,5 @@
 """Durable intent ledger for side-effecting tool calls."""
+from .paths import data_path
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 import json
@@ -32,7 +33,8 @@ class _IntentLock:
         if fcntl is not None: fcntl.flock(self.handle.fileno(),fcntl.LOCK_UN)
         self.handle.close()
 class ToolIntentStore:
-    def __init__(self,path="data/tool_intents.json",claim_ttl_seconds=60):
+    def __init__(self,path=None,claim_ttl_seconds=60):
+        path = path or data_path("tool_intents.json")
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True); self.lock_path=self.path.with_suffix(self.path.suffix+".lock"); self.claim_ttl_seconds=max(1,claim_ttl_seconds)
     def _read(self):
         if not self.path.exists(): return {}
@@ -82,15 +84,27 @@ class ToolIntentStore:
             expiry=raw.get("claim_expires_at")
             if not expiry or datetime.fromisoformat(expiry)<=datetime.now(timezone.utc):return None
             raw["state"],raw["owner_id"],raw["claim_token"],raw["claim_expires_at"]=state,None,None,None; self._write(data); return ToolIntent(**raw)
-    def mark(self,key,state):
-        if state not in VALID_STATES:raise ValueError("invalid intent state")
+    def finalize_from_journal(self,key,state):
+        """Finalize an ambiguous intent after a terminal journal record is durable."""
+        if state not in {"completed", "failed"}: raise ValueError("journal finalization requires a terminal state")
         with _IntentLock(self.lock_path):
             data=self._read(); raw=data.get(key)
             if raw is None:return None
+            if raw.get("state") in {"completed","failed"}: return ToolIntent(**raw)
+            if raw.get("state") not in AMBIGUOUS_STATES:return None
+            raw["state"],raw["owner_id"],raw["claim_token"],raw["claim_expires_at"]=state,None,None,None; self._write(data); return ToolIntent(**raw)
+    def mark(self,key,state):
+        if state not in AMBIGUOUS_STATES | {"completed","failed"}: raise ValueError("invalid intent state")
+        with _IntentLock(self.lock_path):
+            data=self._read(); raw=data.get(key)
+            if raw is None:return None
+            if raw.get("owner_id") is not None:return None
+            if state in {"completed","failed"} and raw.get("state") in {"completed","failed"}: return ToolIntent(**raw)
             raw["state"]=state; self._write(data); return ToolIntent(**raw)
     def pending(self):
         with _IntentLock(self.lock_path):return [ToolIntent(**raw) for raw in self._read().values() if raw.get("state") in AMBIGUOUS_STATES]
     def _write(self,data):
-        tmp=self.path.with_suffix(self.path.suffix+".tmp"); tmp.write_text(json.dumps(data,ensure_ascii=False,default=str,indent=2),encoding="utf-8")
+        tmp=self.path.with_suffix(self.path.suffix+".tmp")
+        tmp.write_text(json.dumps(data,ensure_ascii=False,default=str,indent=2),encoding="utf-8")
         with tmp.open("r+",encoding="utf-8") as h:h.flush(); import os; os.fsync(h.fileno())
         tmp.replace(self.path)

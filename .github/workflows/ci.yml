@@ -1,0 +1,66 @@
+name: AIOS2 CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aios2-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runner-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Runner diagnostics
+        run: |
+          echo "runner=$RUNNER_NAME"
+          echo "os=$RUNNER_OS"
+          echo "arch=$RUNNER_ARCH"
+          uname -a
+          python --version || true
+
+  tests:
+    needs: runner-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -U pip pytest pytest-asyncio fastapi pydantic httpx jsonschema pyyaml
+      - run: python -m pytest tests -q
+
+  security:
+    needs: runner-check
+    runs-on: ubuntu-latest
+    env:
+      AIOS_OPERATOR_TOKEN: ci-test-token-16
+      AIOS_OPERATOR_ROLE: operator
+      AIOS_OPERATOR_ACTOR: ci
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -U pip pytest fastapi pydantic httpx
+      - run: python -m pytest tests/test_recovery_rbac_matrix.py -q
+
+  production-smoke:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -U pip pytest fastapi pydantic httpx
+      - run: python -m pytest tests/test_production_smoke.py tests/test_diagnostics_endpoint.py -q

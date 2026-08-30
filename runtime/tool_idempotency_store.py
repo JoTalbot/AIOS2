@@ -1,4 +1,5 @@
 """Durable idempotency registry for completed tool side effects."""
+from .paths import data_path
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
@@ -39,7 +40,8 @@ class _StoreLock:
 
 
 class ToolIdempotencyStore:
-    def __init__(self, path: str = "data/tool_idempotency.json"):
+    def __init__(self, path: str = None):
+        path = path or data_path("tool_idempotency.json")
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")

@@ -1,7 +1,9 @@
 import dataclasses
 import json
 
-from runtime.execution_audit import ExecutionAuditLog
+import pytest
+
+from runtime.execution_audit import ExecutionAuditLog, ExecutionAuditEvent
 from runtime.execution_commit import ExecutionCommit, ExecutionCommitCoordinator
 from runtime.execution_store import ExecutionState, ExecutionStore
 
@@ -46,3 +48,30 @@ def test_corrupt_line_does_not_poison_following_valid_sequence(tmp_path):
     appended = coordinator._append_journal(first)
     assert appended.sequence == 3
     assert len(coordinator.pending(all_statuses=True)) == 2
+
+
+def test_reconcile_is_idempotent_after_audit_write(tmp_path):
+    store = ExecutionStore(str(tmp_path / "executions.json"))
+    audit = ExecutionAuditLog(str(tmp_path / "audit.jsonl"))
+    coordinator = ExecutionCommitCoordinator(store, audit, str(tmp_path / "commits.jsonl"))
+    store.save(ExecutionState("e1", status="pending"))
+    coordinator._append_journal(ExecutionCommit("c1", "e1", "pending", "running", 0))
+
+    original_mark = coordinator._mark
+    coordinator._mark = lambda *args: (_ for _ in ()).throw(RuntimeError("crash-after-audit"))
+    with pytest.raises(RuntimeError):
+        coordinator.reconcile()
+    assert store.get("e1").status == "running"
+    assert [e.event_id for e in audit.events("e1")] == ["c1"]
+
+    coordinator._mark = original_mark
+    assert coordinator.reconcile() == ["c1"]
+    assert [e.event_id for e in audit.events("e1")] == ["c1"]
+
+
+def test_audit_append_is_idempotent_by_commit_identity(tmp_path):
+    audit = ExecutionAuditLog(str(tmp_path / "audit.jsonl"))
+    event = ExecutionAuditEvent("e1", "pending", "running", event_id="c1")
+    assert audit.append(event).event_id == "c1"
+    assert audit.append(event).event_id == "c1"
+    assert len(audit.events("e1")) == 1
