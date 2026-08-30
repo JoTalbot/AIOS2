@@ -2,9 +2,12 @@ name: AIOS2 Automatic Version Release
 
 on:
   workflow_run:
+    # Release only after CI on main: triggering on the version-bump workflow
+    # as well produced an empty duplicate release for every merge (the bump
+    # commit carries no content). The existing-tag guard already prevents
+    # double releases of the same version.
     workflows:
       - "AIOS2 CI"
-      - "AIOS2 Automatic Semantic Version Bump"
     types:
       - completed
 

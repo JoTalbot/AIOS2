@@ -11,7 +11,7 @@ Completed:
 - created the UASEP v3.4.0 artifact tree and migrated the `.agents/` content (status → `.uasep/state/`, lessons → `.uasep/knowledge/`, skills → `skills/`, protocol v1.0 → superseded by this adoption, DECISION-0001/0002);
 - recorded adoption findings (protocol gaps discovered during real adoption) in `.uasep/knowledge/UASEP_ADOPTION_FINDINGS.md`.
 
-Current task: AIOS2-RUNTIME-002-2026-08-30.
+Current task: NONE.
 
 Unverified:
 - Whether batch 26–29 branch content is fully included in `main`.
