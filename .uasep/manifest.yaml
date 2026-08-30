@@ -1,12 +1,19 @@
 protocol: UASEP
-protocol_version: 3.4.0
+protocol_version: 3.5.0
 project_instance: AIOS2
 project_state: ACTIVE
 autonomy_level: L3
 source_of_truth: repository
-runtime: NONE
-# runtime: NONE describes the UASEP protocol layer: no UASEP runtime is
-# required to operate this repository. AIOS2 itself is an autonomous AI
-# runtime — that is the project's product, not the coordination protocol's
-# runtime. See .uasep/decisions/DECISION-0001 and the adoption findings in
-# .uasep/knowledge/UASEP_ADOPTION_FINDINGS.md.
+uasep_runtime: NONE
+project_runtime: "AIOS2 autonomous agent runtime (kernel/runtime/cognition/api, FastAPI + uvicorn)"
+project:
+  validation:
+    ci: github-actions
+    required: true
+    suites: [tests, security-rbac-matrix, production-smoke]
+  execution:
+    current_focus: test hygiene and protocol v3.5.0 alignment
+  rules:
+    one_canonical_execution_path: true
+    regression_tests_for_public_contracts: true
+    adr_for_architectural_changes: true

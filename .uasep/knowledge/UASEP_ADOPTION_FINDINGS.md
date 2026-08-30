@@ -89,3 +89,11 @@ minimal artifact checks) that adopters can drop into `tests/`.
   for the core artifact set.
 - The evidence model (baseline run recorded before touching anything) directly
   enabled honest before/after comparison.
+
+## Resolutions (2026-08-30, UASEP v3.5.0)
+
+The upstream UASEP v3.5.0 release ("Adoption hardening", M63) resolves every conformance finding recorded above:
+
+- F1/F2/F3/F4 (semantic gaps, schema extensions, none-vs-standard runtime): resolved by the 3.5.0 manifest schema — `uasep_runtime` is a required const NONE (protocol-layer marker), while `project_runtime` (string) and `project` (object) extensions describe the adopting project's runtime and validation requirements natively. AIOS2's manifest now uses these fields.
+- F5 (branch lifecycle guidance): resolved by the new OWNERSHIP.md "Branch lifecycle" section — patch-equivalence via `git cherry`, delete merged branches, archive tags, bulk cleanup as a recorded task. Applied to AIOS2 in batch 30 (38 branches deleted with evidence).
+- F6/F7 (portable conformance checks, reusable kit): resolved by the shipped `kit/uasep/` conformance kit (7 checks; requires jsonschema+pyyaml in CI). AIOS2 adopted it as `tests/uasep/` — it runs in CI on every PR and already caught one state-schema violation during batch 30 (stray fields in state.json).

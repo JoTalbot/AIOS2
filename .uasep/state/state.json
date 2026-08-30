@@ -1,23 +1,28 @@
 {
   "protocol": "UASEP",
-  "protocol_version": "3.4.0",
+  "protocol_version": "3.5.0",
   "project_state": "ACTIVE",
   "environment": "chat + GitHub-connected tools",
   "objective": "Production hardening of the AIOS2 autonomous runtime: execution/recovery durability, API hardening, and release automation.",
-  "active_task": "AIOS2-UASEP-ADOPT-2026-08-30",
-  "active_tasks": ["AIOS2-UASEP-ADOPT-2026-08-30"],
+  "active_task": "AIOS2-BATCH30-2026-08-30",
+  "active_tasks": [
+    "AIOS2-BATCH30-2026-08-30"
+  ],
   "last_verified": "2026-08-30",
   "next_best_actions": [
-    "Verify whether batch 26-29 branch content is fully included in main (rebase-merge history makes branch ancestry unreliable).",
-    "Continue concurrent corruption and quarantine hardening.",
-    "Reduce operational documentation debt in docs/.",
-    "Branch hygiene: reconcile or delete ~100 stale batch branches."
+    "Merge batch/30-test-hygiene-uasep-3.5 after green CI, then finalize its evidence records.",
+    "Integrate the verified-unmerged hardening batches: 26 quarantine coordination, 27 durability fencing, 28 lease durability, 29 lease hardening (regression tests exist only on branches).",
+    "Decide the tracking policy for data/*.jsonl files that tests used to append to (gitignore vs untrack).",
+    "Review the remaining ~59 non-main branches for unique work beyond batches 26-29.",
+    "Reduce operational documentation debt in docs/ (AIOS2-OPS-001)."
   ],
   "blockers": [],
-  "unknowns": [
-    "Whether the batch 26-29 branches' content is fully merged into main; ancestry checks are unreliable under rebase merges and require content-level verification."
-  ],
+  "unknowns": [],
   "evidence": [
-    "Baseline: 232 tests passed locally on main 97e2edf — EV-AIOS2-BASELINE-2026-08-30.json."
+    "Adoption: PR #93 merged, AIOS2 v1.8.0, protocol layer active — EV-AIOS2-ADOPTION-2026-08-30.json.",
+    "Baseline: 232 tests passed locally on main — EV-AIOS2-BASELINE-2026-08-30.json.",
+    "Batch 30 test hygiene: 20/20 stable runs, data/ clean after full suite — EV-AIOS2-TESTHYGIENE-2026-08-30.json.",
+    "Batch 30 protocol 3.5.0 migration, kit 7/7 local — EV-AIOS2-UASEP35-2026-08-30.json.",
+    "Batch 30 branch cleanup: 38 patch-equivalent branches deleted; batches 26/28/29 and part of 27 verified unmerged — EV-AIOS2-BRANCHHYGIENE-2026-08-30.json."
   ]
 }

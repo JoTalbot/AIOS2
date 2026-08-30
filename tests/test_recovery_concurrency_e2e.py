@@ -1,4 +1,5 @@
 import threading
+import time
 
 from runtime.execution_lease import ExecutionLeaseStore
 from runtime.intent_recovery_worker import IntentRecoveryWorker
@@ -15,16 +16,21 @@ def test_concurrent_recovery_workers_commit_one_terminal_effect(tmp_path):
 
     calls = []
     calls_lock = threading.Lock()
-    resolver_started = threading.Event()
-
-    def resolver(item):
-        resolver_started.set()
-        with calls_lock:
-            calls.append(item.idempotency_key)
-        return "completed", {"ok": True}
-
     results = []
     results_lock = threading.Lock()
+
+    def resolver(item):
+        with calls_lock:
+            calls.append(item.idempotency_key)
+        # Deterministic contention: the lease holder stays inside the
+        # resolver (holding the execution lease) until the other worker has
+        # already attempted recovery and recorded its result. This removes
+        # the scheduling race where one worker fully completes before the
+        # other starts, which used to make this test flaky.
+        deadline = time.monotonic() + 10.0
+        while not results and time.monotonic() < deadline:
+            time.sleep(0.005)
+        return "completed", {"ok": True}
 
     def run(worker_id):
         worker = IntentRecoveryWorker(intents, leases, worker_id, journal)
@@ -38,7 +44,6 @@ def test_concurrent_recovery_workers_commit_one_terminal_effect(tmp_path):
     for thread in threads:
         thread.join(timeout=10)
 
-    assert resolver_started.is_set()
     assert len(results) == 2
     assert sum(result.status == "completed" for result in results) == 1
     assert sum(result.status == "skipped_by_lease" for result in results) == 1

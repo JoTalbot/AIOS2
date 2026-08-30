@@ -1,0 +1,18 @@
+{
+  "evidence_id": "EV-AIOS2-BRANCHHYGIENE-2026-08-30",
+  "task_id": "AIOS2-BATCH30-2026-08-30",
+  "timestamp": "2026-08-30T09:34:00Z",
+  "agent": "arena-ai-coding-agent",
+  "operation": "Evidence-based branch cleanup and batch 26-29 inclusion verification",
+  "scope": "remote branches",
+  "result": "VERIFIED",
+  "source": "git rev-list and git cherry patch-equivalence analysis per branch; content-level checks for batches 26-29",
+  "observed": "Analyzed 99 non-main remote branches. 38 branches were fully patch-equivalent to main (every commit's patch-id present in main; this correctly handles the repository's rebase merges) and were deleted, including the merged uasep/adopt-v3.4.0 and the legacy uasep/bootstrap-v1. 60 branches with work not in main remain. Batch 26-29 verification: batch/27-recovery-quarantine-determinism is fully in main (identical test file); batch/26-journal-quarantine-hardening, batch/26-quarantine-coordination, batch/27-durability-fencing, batch/28-lease-durability, and batch/29-lease-hardening contain unmerged work — their regression tests (test_journal_quarantine_coordination.py, test_execution_journal_quarantine.py, test_durability_boundaries.py, test_lease_durability.py, and ten test files from batch/29) are absent from main. The legacy manifest's 'concurrent corruption and quarantine behavior' focus was therefore accurate: that hardening work exists only on branches.",
+  "commit": null,
+  "changed_files": [],
+  "verification": "git cherry main <branch> returned no '+' commits for each deleted branch; deleted via git push origin --delete (38 confirmed deletions).",
+  "limitations": [
+    "Content-level verification for the 60 remaining branches was prioritized to batches 26-29; others still carry a 'unique commits' flag pending review."
+  ],
+  "related": []
+}

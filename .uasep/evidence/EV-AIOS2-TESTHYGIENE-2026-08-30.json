@@ -1,0 +1,31 @@
+{
+  "evidence_id": "EV-AIOS2-TESTHYGIENE-2026-08-30",
+  "task_id": "AIOS2-BATCH30-2026-08-30",
+  "timestamp": "2026-08-30T09:30:00Z",
+  "agent": "arena-ai-coding-agent",
+  "operation": "Stabilize the concurrency e2e test and isolate test data writes",
+  "scope": "tests/test_recovery_concurrency_e2e.py, tests/conftest.py, runtime/paths.py, runtime store modules",
+  "result": "VERIFIED",
+  "source": "repeated local pytest runs, git status of data/ after full-suite runs",
+  "observed": "Flaky test: test_concurrent_recovery_workers_commit_one_terminal_effect failed ~3 of 10 runs because thread scheduling could let one worker fully complete before the other started (the second then replays from the journal and both report 'completed'). Fix: the resolver now holds the execution lease until the other worker has recorded its result, making lease contention deterministic; semantics unchanged (one terminal effect, one skipped_by_lease). 20/20 consecutive passes after the fix. Data isolation: runtime store defaults moved behind runtime/paths.py data_path() with the AIOS2_DATA_DIR environment override (default 'data' unchanged); tests/conftest.py redirects to a session temp dir before any test module import. Full suite: 232 passed, and git status data/ is clean after runs (previously data/execution_commits.quarantine.jsonl and data/operator_audit.jsonl were appended on every run).",
+  "commit": null,
+  "changed_files": [
+    "runtime/paths.py",
+    "runtime/execution_audit.py",
+    "runtime/execution_commit.py",
+    "runtime/execution_lease.py",
+    "runtime/execution_store.py",
+    "runtime/operator_audit.py",
+    "runtime/reconciliation_journal.py",
+    "runtime/recovery_queue.py",
+    "runtime/tool_idempotency_store.py",
+    "runtime/tool_intent_store.py",
+    "tests/conftest.py",
+    "tests/test_recovery_concurrency_e2e.py"
+  ],
+  "verification": "20/20 passes of the stabilized test; 232 passed full suite; data/ clean after runs.",
+  "limitations": [],
+  "related": [
+    "EV-AIOS2-BASELINE-2026-08-30.json"
+  ]
+}

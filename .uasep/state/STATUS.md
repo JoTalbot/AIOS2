@@ -8,7 +8,7 @@ Production hardening of the AIOS2 autonomous runtime: execution/recovery durabil
 
 - Phase: ACTIVE — production hardening of the execution/recovery path
 - Branch: `main` @ `97e2edf` (v1.7.0)
-- Protocol: UASEP 3.4.0 (adopted 2026-08-30)
+- Protocol: UASEP 3.5.0 (migrated 2026-08-30)
 
 ## Current task
 
