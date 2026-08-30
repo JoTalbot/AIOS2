@@ -2,7 +2,7 @@
 
 Current objective: adopt UASEP v3.4.0 as the agent coordination layer for AIOS2.
 
-Current step: the adoption package is on branch `uasep/adopt-v3.4.0` — durable state, planning, knowledge, evidence, and decisions trees, a rewritten `AGENTS.md`, ported `skills/`, a project `protocol/README.md` norms addendum, and retirement of the legacy `.agents/` directory. Merge after CI is green, then finalize the adoption evidence.
+Current step: UASEP v3.4.0 adoption is COMPLETE and VERIFIED — PR #93 merged to main (aadb7a8) after AIOS2 CI run 33300118930 passed all jobs (runner-check, tests, security, production-smoke). Adoption evidence promoted to VERIFIED; task contract DONE; ownership released.
 
 Completed:
 - baseline verification: 232 tests passed locally on `main` @ `97e2edf` (EV-AIOS2-BASELINE-2026-08-30.json);
@@ -11,18 +11,17 @@ Completed:
 - created the UASEP v3.4.0 artifact tree and migrated the `.agents/` content (status → `.uasep/state/`, lessons → `.uasep/knowledge/`, skills → `skills/`, protocol v1.0 → superseded by this adoption, DECISION-0001/0002);
 - recorded adoption findings (protocol gaps discovered during real adoption) in `.uasep/knowledge/UASEP_ADOPTION_FINDINGS.md`.
 
-Current task: AIOS2-UASEP-ADOPT-2026-08-30.
+Current task: NONE.
 
 Unverified:
-- CI on the adoption PR (must be green before merge).
 - Whether batch 26–29 branch content is fully included in `main`.
 
 Blockers: none.
 
 Next action:
-1. Merge `uasep/adopt-v3.4.0` after green CI.
-2. Update the adoption evidence and state to VERIFIED.
-3. Verify batch 26–29 inclusion at content level.
-4. Continue with quarantine/corruption hardening and documentation debt.
+1. Verify batch 26–29 inclusion at content level (ancestry checks are unreliable under rebase merges).
+2. Continue with quarantine/corruption hardening.
+3. Reduce operational documentation debt.
+4. Branch hygiene: reconcile or delete ~100 stale batch branches.
 
-Evidence status: baseline VERIFIED (232 tests). Adoption PARTIALLY_VERIFIED until CI is observed.
+Evidence status: baseline VERIFIED (232 tests). Adoption VERIFIED (CI run 33300118930, PR #93, merged aadb7a8).

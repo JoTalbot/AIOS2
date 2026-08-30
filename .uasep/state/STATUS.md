@@ -12,16 +12,16 @@ Production hardening of the AIOS2 autonomous runtime: execution/recovery durabil
 
 ## Current task
 
-- ID: AIOS2-UASEP-ADOPT-2026-08-30
-- Owner: arena-ai-coding-agent
-- Scope: adopt the UASEP v3.4.0 protocol layer, migrate legacy `.agents/`
+- ID: NONE
+- Owner: NONE
+- Scope: next backlog item (batch 26-29 verification recommended)
 
 ## Progress
 
 - Runtime architecture: kernel / runtime / cognition / api with one canonical execution, persistence, and recovery path.
 - Hardening batches 1–25 landed (leases, fencing, CAS transitions, execution commit journal, journal read coordination — batch 25 content verified present on `main` despite unmerged branch ref, rebase-merge history).
 - Release automation to v1.7.0: semantic version bump, tag/release pipeline, post-release health validation, rollback verification.
-- UASEP v3.4.0 adopted (2026-08-30): durable state, planning, knowledge, evidence, and decisions trees established; legacy `.agents/` v1.0 retired.
+- UASEP v3.4.0 adopted and VERIFIED (2026-08-30): PR #93 merged (aadb7a8) after green CI run 33300118930; durable state, planning, knowledge, evidence, and decisions trees established; legacy `.agents/` v1.0 retired.
 
 ## Validation
 
