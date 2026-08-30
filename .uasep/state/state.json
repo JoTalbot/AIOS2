@@ -1,0 +1,23 @@
+{
+  "protocol": "UASEP",
+  "protocol_version": "3.4.0",
+  "project_state": "ACTIVE",
+  "environment": "chat + GitHub-connected tools",
+  "objective": "Production hardening of the AIOS2 autonomous runtime: execution/recovery durability, API hardening, and release automation.",
+  "active_task": "AIOS2-UASEP-ADOPT-2026-08-30",
+  "active_tasks": ["AIOS2-UASEP-ADOPT-2026-08-30"],
+  "last_verified": "2026-08-30",
+  "next_best_actions": [
+    "Verify whether batch 26-29 branch content is fully included in main (rebase-merge history makes branch ancestry unreliable).",
+    "Continue concurrent corruption and quarantine hardening.",
+    "Reduce operational documentation debt in docs/.",
+    "Branch hygiene: reconcile or delete ~100 stale batch branches."
+  ],
+  "blockers": [],
+  "unknowns": [
+    "Whether the batch 26-29 branches' content is fully merged into main; ancestry checks are unreliable under rebase merges and require content-level verification."
+  ],
+  "evidence": [
+    "Baseline: 232 tests passed locally on main 97e2edf — EV-AIOS2-BASELINE-2026-08-30.json."
+  ]
+}
