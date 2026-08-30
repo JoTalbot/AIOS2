@@ -1,4 +1,5 @@
 """Persistent execution state with process-safe optimistic CAS."""
+from .paths import data_path
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json, os
@@ -26,7 +27,8 @@ class _FileLock:
         if fcntl is not None: fcntl.flock(self.handle.fileno(),fcntl.LOCK_UN)
         self.handle.close()
 class ExecutionStore:
-    def __init__(self,path="data/executions.json",state_machine=None,audit_log=None,coordination_lock_path=None):
+    def __init__(self,path=None,state_machine=None,audit_log=None,coordination_lock_path=None):
+        path = path or data_path("executions.json")
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True); self.lock_path=self.path.with_suffix(self.path.suffix+".lock"); self.coordination_lock_path=Path(coordination_lock_path) if coordination_lock_path else None; self.state_machine=state_machine or ExecutionStateMachine(); self.audit_log=audit_log
         if not self.path.exists():
             with self.execution_lock():

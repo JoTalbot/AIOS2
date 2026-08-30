@@ -1,0 +1,42 @@
+{
+  "id": "AIOS2-BATCH30-2026-08-30",
+  "objective": "Test hygiene (deterministic concurrency test, data isolation), migration to UASEP v3.5.0 with the conformance kit, and evidence-based branch hygiene.",
+  "owner": "arena-ai-coding-agent",
+  "branch": "batch/30-test-hygiene-uasep-3.5",
+  "write_set": [
+    "runtime/paths.py",
+    "runtime/",
+    "tests/conftest.py",
+    "tests/test_recovery_concurrency_e2e.py",
+    "tests/uasep/",
+    ".uasep/",
+    ".github/workflows/ci.yml"
+  ],
+  "dependencies": [
+    "AIOS2-UASEP-ADOPT-2026-08-30"
+  ],
+  "conflicts": [],
+  "acceptance": [
+    "The concurrency e2e test is deterministic (20/20 consecutive passes) with unchanged semantics",
+    "Test runs no longer mutate tracked data/*.jsonl files",
+    "Manifest and durable state conform to UASEP v3.5.0 (uasep_runtime semantics) and the conformance kit passes in CI",
+    "38 patch-equivalent branches are deleted with recorded evidence",
+    "Unmerged batch 26-29 work is identified and recorded as the next integration task",
+    "Full suite green locally and CI green before merge"
+  ],
+  "risk": "MEDIUM",
+  "verification": [
+    "20 consecutive runs of the previously flaky test: all passed",
+    "python -m pytest tests -q: 232 passed with data/ clean afterwards",
+    "python -m pytest tests/uasep -q: 7 passed (kit against AIOS2 artifacts)",
+    "git cherry patch-equivalence analysis for every remote branch",
+    "GitHub Actions CI on the batch PR"
+  ],
+  "status": "IN_PROGRESS",
+  "evidence": [
+    ".uasep/evidence/EV-AIOS2-TESTHYGIENE-2026-08-30.json",
+    ".uasep/evidence/EV-AIOS2-UASEP35-2026-08-30.json",
+    ".uasep/evidence/EV-AIOS2-BRANCHHYGIENE-2026-08-30.json"
+  ],
+  "next_action": "Push the branch, open the PR, merge after CI is green, then finalize evidence."
+}

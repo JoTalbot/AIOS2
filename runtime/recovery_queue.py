@@ -1,4 +1,5 @@
 """Persistent operator queues for quarantine and manual recovery decisions."""
+from .paths import data_path
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
@@ -32,7 +33,8 @@ class _QueueLock:
         self.handle.close()
 
 class RecoveryQueue:
-    def __init__(self, path: str="data/recovery_queue.jsonl"):
+    def __init__(self, path: str=None):
+        path = path or data_path("recovery_queue.jsonl")
         self.path=Path(path); self.path.parent.mkdir(parents=True, exist_ok=True); self.lock_path=self.path.with_suffix(self.path.suffix+".lock")
     def _read_unlocked(self):
         return [] if not self.path.exists() else [RecoveryQueueItem(**json.loads(x)) for x in self.path.read_text(encoding="utf-8").splitlines() if x.strip()]
