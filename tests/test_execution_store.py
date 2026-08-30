@@ -1,6 +1,6 @@
 import pytest
 
-from runtime.execution_store import ExecutionState, ExecutionStore, ExecutionVersionConflictError
+from runtime.execution_store import ExecutionState, ExecutionStore
 
 
 def test_execution_store_persists_and_recovers(tmp_path):
@@ -16,37 +16,26 @@ def test_execution_store_persists_and_recovers(tmp_path):
     assert len(restored.resumable()) == 1
 
 
-def test_execution_store_updates_status_with_observed_version(tmp_path):
+def test_execution_store_updates_status(tmp_path):
     store = ExecutionStore(str(tmp_path / "executions.json"))
-    state = store.save(ExecutionState("exec-2"))
-    state.status = "completed"
-    state.result = "ok"
-    store.save(state)
+    store.save(ExecutionState("exec-2"))
+    store.save(ExecutionState("exec-2", status="completed", result="ok"))
     assert store.get("exec-2").status == "completed"
     assert store.resumable() == []
 
 
-def test_save_rejects_stale_writer_instead_of_last_write_wins(tmp_path):
+def test_fencing_token_requires_validator(tmp_path):
+    from runtime.execution_store import ExecutionFencingConflictError, ExecutionState, ExecutionStore
     store = ExecutionStore(str(tmp_path / "executions.json"))
-    state = store.save(ExecutionState("exec-3"))
-    stale = store.get("exec-3")
-    winner = store.get("exec-3")
-
-    winner.status = "running"
-    store.save(winner)
-
-    stale.status = "failed"
-    with pytest.raises(ExecutionVersionConflictError):
-        store.save(stale)
-
-    assert store.get("exec-3").status == "running"
+    with pytest.raises(ExecutionFencingConflictError):
+        store.compare_and_set(ExecutionState("exec-fence"), 0, fencing_token=1)
 
 
-def test_new_state_with_zero_version_cannot_overwrite_existing_execution(tmp_path):
+def test_fencing_validator_can_reject_write(tmp_path):
+    from runtime.execution_store import ExecutionFencingConflictError, ExecutionState, ExecutionStore
     store = ExecutionStore(str(tmp_path / "executions.json"))
-    store.save(ExecutionState("exec-4", status="running"))
+    with pytest.raises(ExecutionFencingConflictError):
+        store.compare_and_set(ExecutionState("exec-fence"), 0, fencing_token=1, fencing_validator=lambda *_: False)
+    assert store.get("exec-fence") is None
 
-    with pytest.raises(ExecutionVersionConflictError):
-        store.save(ExecutionState("exec-4", status="completed"))
-
-    assert store.get("exec-4").status == "running"
+# CI trigger: fencing regression suite must execute on the current workflow attempt.

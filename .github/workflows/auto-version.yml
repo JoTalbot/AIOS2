@@ -1,0 +1,53 @@
+name: AIOS2 Automatic Semantic Version Bump
+
+on:
+  workflow_run:
+    workflows: ["AIOS2 CI"]
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  bump-version:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Calculate next version
+        id: version
+        run: |
+          CURRENT=$(cat VERSION | tr -d '\n')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          COMMITS=$(git log -20 --pretty=%B)
+
+          if echo "$COMMITS" | grep -q "BREAKING CHANGE"; then
+            MAJOR=$((MAJOR+1))
+            MINOR=0
+            PATCH=0
+          elif echo "$COMMITS" | grep -qE "^feat"; then
+            MINOR=$((MINOR+1))
+            PATCH=0
+          else
+            PATCH=$((PATCH+1))
+          fi
+
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "$NEW_VERSION" > VERSION
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Commit version bump
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add VERSION
+          git commit -m "chore(release): bump version to ${{ steps.version.outputs.version }} [skip ci]" || exit 0
+          git push origin main

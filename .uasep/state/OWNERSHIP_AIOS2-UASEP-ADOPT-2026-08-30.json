@@ -1,0 +1,19 @@
+{
+  "task_id": "AIOS2-UASEP-ADOPT-2026-08-30",
+  "owner": "arena-ai-coding-agent",
+  "branch": "uasep/adopt-v3.4.0",
+  "write_set": [
+    "AGENTS.md",
+    ".uasep/",
+    "skills/",
+    "protocol/README.md",
+    "docs/UASEP_INTEGRATION.md",
+    ".agents/"
+  ],
+  "claim_time": "2026-08-30 UTC",
+  "expected_completion": "Same session: adoption package merged after green CI",
+  "status": "ACTIVE",
+  "last_refresh": "2026-08-30 UTC",
+  "transfer_to": null,
+  "release_reason": null
+}
