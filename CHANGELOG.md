@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.0 - Release
+
+### Added
+- Automated release pipeline.
+- Automatic version driven tagging.
+- GitHub Release generation workflow.
+- Improved CI release integration.
+
+### Improved
+- API hardening.
+- Reliability validation.
+- Security checks.
+- Release automation.
+
+### Validation
+- CI validation completed.
+- Release workflow completed.
+- Production readiness checks completed.
+
 ## 1.0.0 - Initial Release
 
 ### Added
