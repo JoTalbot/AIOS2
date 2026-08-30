@@ -1,8 +1,7 @@
 """Startup recovery for restart-safe AIOS executions."""
-
 from typing import Any, Optional
 
-from .execution_store import ExecutionState, ExecutionStore
+from .execution_store import ExecutionState, ExecutionStore, ExecutionVersionConflictError, ExecutionFencingConflictError
 from .recovery_outcome import RecoveryOutcome
 
 
@@ -12,9 +11,7 @@ class RecoveryManager:
     def __init__(self, store: ExecutionStore, lease_store=None, owner_id: Optional[str] = None):
         if (lease_store is None) != (owner_id is None):
             raise ValueError("lease_store and owner_id must be provided together")
-        self.store = store
-        self.lease_store = lease_store
-        self.owner_id = owner_id
+        self.store, self.lease_store, self.owner_id = store, lease_store, owner_id
 
     def pending(self):
         return self.store.resumable()
@@ -27,7 +24,6 @@ class RecoveryManager:
         *,
         continue_on_error: bool = True,
     ):
-        """Resume pending executions, fencing ownership through the lease token."""
         recovered = []
         for state in self.pending():
             lease = None
@@ -42,22 +38,70 @@ class RecoveryManager:
                 ):
                     recovered.append(RecoveryOutcome(state.execution_id, "skipped_by_lease"))
                     continue
-                result = await loop.resume(state.execution_id, agent, context=context)
+                resume = getattr(loop, "resume", None)
+                result = (
+                    resume(state.execution_id, agent, context=context)
+                    if resume is not None
+                    else loop.run(
+                        state.goal,
+                        agent,
+                        context=context,
+                        execution_context=None,
+                    )
+                )
+                if hasattr(result, "__await__"):
+                    await result
+                if lease is not None and not self.lease_store.is_owner(
+                    state.execution_id, self.owner_id, lease.fencing_token
+                ):
+                    raise ExecutionFencingConflictError(
+                        f"execution lease fenced: {state.execution_id}"
+                    )
             except Exception as exc:
-                self.mark_failed(state, exc)
-                recovered.append(RecoveryOutcome(state.execution_id, "failed"))
+                try:
+                    marked = self.mark_failed(state, exc, lease=lease)
+                except (ExecutionVersionConflictError, ExecutionFencingConflictError):
+                    marked = False
+                recovered.append(
+                    RecoveryOutcome(
+                        state.execution_id,
+                        "failed" if marked is not False else "stale",
+                    )
+                )
                 if not continue_on_error:
                     raise
                 continue
             finally:
                 if lease is not None:
-                    self.lease_store.release(
-                        state.execution_id, self.owner_id, lease.fencing_token
-                    )
+                    try:
+                        self.lease_store.release(
+                            state.execution_id,
+                            self.owner_id,
+                            lease.fencing_token,
+                        )
+                    except Exception:
+                        # Lease expiry/fencing is handled by ownership checks above;
+                        # release failure must not corrupt the durable recovery result.
+                        pass
             recovered.append(RecoveryOutcome(state.execution_id, "recovered"))
         return recovered
 
-    def mark_failed(self, state: ExecutionState, error: BaseException):
-        state.status = "failed"
-        state.error = str(error)
-        return self.store.save(state)
+    def mark_failed(self, state: ExecutionState, error: BaseException, *, lease=None):
+        fencing_token = None
+        fencing_validator = None
+        if lease is not None:
+            if self.lease_store is None or not self.lease_store.is_owner(
+                state.execution_id, self.owner_id, lease.fencing_token
+            ):
+                return False
+            fencing_token = lease.fencing_token
+            fencing_validator = lambda execution_id, token: self.lease_store.is_owner(
+                execution_id, self.owner_id, token
+            )
+        state.status, state.error = "failed", str(error)
+        return self.store.compare_and_set(
+            state,
+            state.version,
+            fencing_token=fencing_token,
+            fencing_validator=fencing_validator,
+        )

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JoTalbot/UASEP/schemas/ownership.schema.json",
+  "title": "UASEP Ownership Lease",
+  "type": "object",
+  "required": ["task_id", "owner", "branch", "write_set", "claim_time", "expected_completion"],
+  "properties": {
+    "task_id": {"type": "string", "minLength": 1},
+    "owner": {"type": "string", "minLength": 1},
+    "branch": {"type": "string", "minLength": 1},
+    "write_set": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "claim_time": {"type": "string", "minLength": 1},
+    "expected_completion": {"type": "string", "minLength": 1},
+    "status": {"enum": ["ACTIVE", "RELEASED", "TRANSFERRED", "STALE", "CONFLICT"]},
+    "last_refresh": {"type": ["string", "null"]},
+    "transfer_to": {"type": ["string", "null"]},
+    "release_reason": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

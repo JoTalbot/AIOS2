@@ -16,7 +16,7 @@ async def test_agent_executor_uses_typed_tool_results_and_memory():
     registry.register("add", add, permissions={"compute"})
     memory = []
     executor = AgentExecutor(
-        ToolExecutor(ToolSandbox(registry)),
+        ToolExecutor(ToolSandbox(registry, authorization={"agent-1": {"compute"}})),
         memory=type("Memory", (), {"remember": lambda self, item: memory.append(item)})(),
     )
 
