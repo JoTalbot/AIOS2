@@ -32,11 +32,11 @@
     "git cherry patch-equivalence analysis for every remote branch",
     "GitHub Actions CI on the batch PR"
   ],
-  "status": "IN_PROGRESS",
+  "status": "DONE",
   "evidence": [
     ".uasep/evidence/EV-AIOS2-TESTHYGIENE-2026-08-30.json",
     ".uasep/evidence/EV-AIOS2-UASEP35-2026-08-30.json",
     ".uasep/evidence/EV-AIOS2-BRANCHHYGIENE-2026-08-30.json"
   ],
-  "next_action": "Push the branch, open the PR, merge after CI is green, then finalize evidence."
+  "next_action": "None. Successor: AIOS2-RUNTIME-002 (integrate unmerged batches 26/27/28/29)."
 }

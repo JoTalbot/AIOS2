@@ -12,9 +12,9 @@
     ".github/workflows/ci.yml"
   ],
   "claim_time": "2026-08-30 UTC",
-  "expected_completion": "Same session: merged after green CI",
-  "status": "ACTIVE",
+  "expected_completion": "Completed 2026-08-30: merged as 18d9cfd, AIOS2 v1.9.0 released.",
+  "status": "RELEASED",
   "last_refresh": "2026-08-30 UTC",
   "transfer_to": null,
-  "release_reason": null
+  "release_reason": "Merged to main (merge commit 18d9cfd) after green CI; PR #94; branch deleted."
 }

@@ -8,7 +8,7 @@
   "result": "VERIFIED",
   "source": "repeated local pytest runs, git status of data/ after full-suite runs",
   "observed": "Flaky test: test_concurrent_recovery_workers_commit_one_terminal_effect failed ~3 of 10 runs because thread scheduling could let one worker fully complete before the other started (the second then replays from the journal and both report 'completed'). Fix: the resolver now holds the execution lease until the other worker has recorded its result, making lease contention deterministic; semantics unchanged (one terminal effect, one skipped_by_lease). 20/20 consecutive passes after the fix. Data isolation: runtime store defaults moved behind runtime/paths.py data_path() with the AIOS2_DATA_DIR environment override (default 'data' unchanged); tests/conftest.py redirects to a session temp dir before any test module import. Full suite: 232 passed, and git status data/ is clean after runs (previously data/execution_commits.quarantine.jsonl and data/operator_audit.jsonl were appended on every run).",
-  "commit": null,
+  "commit": "26724a1 (merged via PR #94 → 18d9cfd)",
   "changed_files": [
     "runtime/paths.py",
     "runtime/execution_audit.py",
