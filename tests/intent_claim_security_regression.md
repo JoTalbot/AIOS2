@@ -1,0 +1,1 @@
+Security regression coverage is present for ToolIntentStore claim ownership and stale-token completion. Runtime terminal transitions must not bypass active claims.

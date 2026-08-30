@@ -1,4 +1,5 @@
 """Crash-recoverable execution commit protocol with an integrity-protected journal."""
+from .paths import data_path
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hashlib, json, os
@@ -25,7 +26,9 @@ class _JournalLock:
         if fcntl is not None:fcntl.flock(self.handle.fileno(),fcntl.LOCK_UN)
         self.handle.close()
 class ExecutionCommitCoordinator:
-    def __init__(self,store,audit_log,journal_path="data/execution_commits.jsonl",quarantine_path="data/execution_commits.quarantine.jsonl",lease_store=None,lease_owner_id=None,fencing_token=None):
+    def __init__(self,store,audit_log,journal_path=None,quarantine_path=None,lease_store=None,lease_owner_id=None,fencing_token=None):
+        journal_path = journal_path or data_path("execution_commits.jsonl")
+        quarantine_path = quarantine_path or data_path("execution_commits.quarantine.jsonl")
         self.store=store;self.audit_log=audit_log;self.journal_path=Path(journal_path);self.quarantine_path=Path(quarantine_path);self.lease_store=lease_store;self.lease_owner_id=lease_owner_id;self.fencing_token=fencing_token;self.journal_path.parent.mkdir(parents=True,exist_ok=True);self.lock_path=self.journal_path.with_suffix(self.journal_path.suffix+".lock")
         if self.lease_store is not None:self.lease_store.lock_path=self.store.coordination_lock_path or self.store.lock_path
     def _next_sequence_unlocked(self):
@@ -41,7 +44,7 @@ class ExecutionCommitCoordinator:
             commit=ExecutionCommit(**{**asdict(commit),"sequence":self._next_sequence_unlocked()}).with_integrity()
             with self.journal_path.open("a",encoding="utf-8") as h:h.write(json.dumps(asdict(commit),ensure_ascii=False,default=str)+"\n");h.flush();os.fsync(h.fileno())
             return commit
-    def _read_journal(self):
+    def _read_journal_unlocked(self):
         if not self.journal_path.exists():return []
         result=[];expected=1
         for line in self.journal_path.read_text(encoding="utf-8").splitlines():
@@ -54,6 +57,9 @@ class ExecutionCommitCoordinator:
                 self._quarantine(line,str(exc));expected=max(expected+1,int(raw.get("sequence",0))+1) if isinstance(raw,dict) else expected+1;continue
             result.append(commit);expected=commit.sequence+1
         return result
+    def _read_journal(self):
+        with _JournalLock(self.lock_path):
+            return self._read_journal_unlocked()
     def _quarantine(self,line,reason):
         with self.quarantine_path.open("a",encoding="utf-8") as h:h.write(json.dumps({"reason":reason,"line":line,"quarantined_at":datetime.now(timezone.utc).isoformat()},ensure_ascii=False)+"\n")
     def _lease_valid_unlocked(self,execution_id):
@@ -77,7 +83,7 @@ class ExecutionCommitCoordinator:
         return commit
     def _mark(self,commit_id,status):
         with _JournalLock(self.lock_path):
-            commits=self._read_journal()
+            commits=self._read_journal_unlocked()
             for i,commit in enumerate(commits):
                 if commit.commit_id==commit_id:commits[i]=ExecutionCommit(**{**asdict(commit),"status":status}).with_integrity();break
             tmp=self.journal_path.with_suffix(self.journal_path.suffix+".tmp");tmp.write_text("".join(json.dumps(asdict(c.with_integrity()),ensure_ascii=False,default=str)+"\n" for c in commits),encoding="utf-8")

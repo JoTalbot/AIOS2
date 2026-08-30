@@ -26,9 +26,12 @@ async def test_sandbox_intersects_claimed_permissions_with_authorization():
     assert result == "ok"
 
 
-def test_idempotency_key_cannot_bind_two_calls(tmp_path):
+def test_idempotency_key_cannot_bind_two_tools(tmp_path):
     store = ToolIdempotencyStore(str(tmp_path / "idempotency.json"))
     store.put_if_absent(StoredToolResult("k", "call-1", "safe", True, "ok"))
+    # A retry may carry a new call_id for the same tool...
+    store.put_if_absent(StoredToolResult("k", "call-2", "safe", True, "ok"))
+    # ...but the key must never silently absorb a different tool.
     with pytest.raises(ValueError):
         store.put_if_absent(StoredToolResult("k", "call-2", "danger", True, "bad"))
 
