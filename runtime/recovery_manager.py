@@ -57,6 +57,11 @@ class RecoveryManager:
                     raise ExecutionFencingConflictError(
                         f"execution lease fenced: {state.execution_id}"
                     )
+            except ExecutionFencingConflictError:
+                recovered.append(RecoveryOutcome(state.execution_id, "stale"))
+                if not continue_on_error:
+                    raise
+                continue
             except Exception as exc:
                 try:
                     marked = self.mark_failed(state, exc, lease=lease)

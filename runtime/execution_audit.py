@@ -52,9 +52,12 @@ class ExecutionAuditLog:
             finally:
                 if fcntl is not None: fcntl.flock(lock.fileno(),fcntl.LOCK_UN)
     def events(self,execution_id=None):
+        if not self.path.exists(): return []
         self.lock_path.touch(exist_ok=True)
         with self.lock_path.open("r+",encoding="utf-8") as lock:
-            if fcntl is not None: fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+            # Readers take a SHARED lock: concurrent audit reads are safe,
+            # while appends stay exclusive.
+            if fcntl is not None: fcntl.flock(lock.fileno(),fcntl.LOCK_SH)
             try: return self._read_events_unlocked(execution_id)
             finally:
                 if fcntl is not None: fcntl.flock(lock.fileno(),fcntl.LOCK_UN)

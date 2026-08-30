@@ -19,6 +19,7 @@ class StoredToolResult:
     ok: bool
     value: Any = None
     error: Optional[str] = None
+    arguments: Optional[dict[str, Any]] = None
 
 
 class _StoreLock:

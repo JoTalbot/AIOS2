@@ -9,6 +9,7 @@ def test_audit_events_are_read_under_audit_lock(tmp_path, monkeypatch):
 
     class ObservedFcntl:
         LOCK_EX = 1
+        LOCK_SH = 3
         LOCK_UN = 2
 
         @staticmethod
@@ -17,8 +18,9 @@ def test_audit_events_are_read_under_audit_lock(tmp_path, monkeypatch):
 
     monkeypatch.setattr("runtime.execution_audit.fcntl", ObservedFcntl)
     assert len(log.events("exec-1")) == 1
-    # events() takes the audit lock for the whole read: EX then UN.
-    assert calls == [ObservedFcntl.LOCK_EX, ObservedFcntl.LOCK_UN]
+    # events() takes a SHARED audit lock for the whole read (concurrent
+    # readers are safe; appends stay exclusive): SH then UN.
+    assert calls == [ObservedFcntl.LOCK_SH, ObservedFcntl.LOCK_UN]
 
 
 def test_store_atomic_replace_syncs_parent_directory(tmp_path, monkeypatch):

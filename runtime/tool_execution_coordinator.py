@@ -43,17 +43,20 @@ class ToolExecutionCoordinator:
         value: Any = None,
         error: str | None = None,
         execution_status: str | None = None,
+        arguments: dict[str, Any] | None = None,
     ) -> ToolExecutionCommit:
         """Durably commit a tool result, then its execution state.
 
         A failed/fenced execution-layer commit never causes the already durable
         tool outcome to be executed again. Callers can reconcile the execution
-        journal independently.
+        journal independently. ``arguments`` remains optional for compatibility
+        with older coordinator callers; newer callers should pass the tool args.
         """
         tool_commit = self.boundary.commit(
             key=key,
             call_id=call_id,
             tool=tool,
+            arguments=arguments,
             owner_id=owner_id,
             claim_token=claim_token,
             ok=ok,

@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import os
 
 import pytest
 
@@ -75,3 +76,20 @@ def test_audit_append_is_idempotent_by_commit_identity(tmp_path):
     assert audit.append(event).event_id == "c1"
     assert audit.append(event).event_id == "c1"
     assert len(audit.events("e1")) == 1
+
+
+def test_corrupt_journal_line_is_durably_quarantined(tmp_path, monkeypatch):
+    store = ExecutionStore(str(tmp_path / "executions.json"))
+    audit = ExecutionAuditLog(str(tmp_path / "audit.jsonl"))
+    journal = tmp_path / "commits.jsonl"
+    quarantine = tmp_path / "commits.quarantine.jsonl"
+    coordinator = ExecutionCommitCoordinator(store, audit, str(journal), str(quarantine))
+    journal.write_text("{malformed}\n", encoding="utf-8")
+
+    fsync_calls = []
+    real_fsync = os.fsync
+    monkeypatch.setattr("runtime.execution_commit.os.fsync", lambda fd: (fsync_calls.append(fd), real_fsync(fd))[1])
+    assert coordinator.pending(all_statuses=True) == []
+    assert quarantine.exists()
+    assert quarantine.read_text(encoding="utf-8").strip()
+    assert fsync_calls

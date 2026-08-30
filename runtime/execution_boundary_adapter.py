@@ -16,6 +16,7 @@ class ToolExecutionBoundary:
             key=call.idempotency_key,
             call_id=call.call_id,
             tool=call.tool,
+            arguments=call.arguments,
             owner_id=owner_id,
             claim_token=claim_token,
             ok=result.ok,
