@@ -1,4 +1,4 @@
-name: AIOS2 Automatic Version Bump
+name: AIOS2 Automatic Semantic Version Bump
 
 on:
   workflow_run:
@@ -21,12 +21,26 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Bump patch version
+      - name: Calculate next version
         id: version
         run: |
-          VERSION=$(cat VERSION | tr -d '\n')
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-          NEW_VERSION="$MAJOR.$MINOR.$((PATCH+1))"
+          CURRENT=$(cat VERSION | tr -d '\n')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          COMMITS=$(git log -20 --pretty=%B)
+
+          if echo "$COMMITS" | grep -q "BREAKING CHANGE"; then
+            MAJOR=$((MAJOR+1))
+            MINOR=0
+            PATCH=0
+          elif echo "$COMMITS" | grep -qE "^feat"; then
+            MINOR=$((MINOR+1))
+            PATCH=0
+          else
+            PATCH=$((PATCH+1))
+          fi
+
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
           echo "$NEW_VERSION" > VERSION
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
