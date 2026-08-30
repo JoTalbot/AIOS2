@@ -2,7 +2,9 @@ name: AIOS2 Automatic Version Release
 
 on:
   workflow_run:
-    workflows: ["AIOS2 CI"]
+    workflows:
+      - "AIOS2 CI"
+      - "AIOS2 Automatic Semantic Version Bump"
     types:
       - completed
 
@@ -22,7 +24,7 @@ jobs:
       - name: Checkout tested commit
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: main
           fetch-depth: 0
 
       - name: Read and validate version
@@ -47,30 +49,14 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build changelog from commits
+      - name: Build release notes
         if: steps.tag.outputs.exists == 'false'
-        shell: bash
         run: |
-          set -euo pipefail
-          TAG="${{ steps.version.outputs.version }}"
-          PREVIOUS="$(git tag --sort=-version:refname | head -n 1 || true)"
-          {
-            echo "# AIOS2 $TAG"
-            echo
-            echo "## Changes"
-            if [[ -n "$PREVIOUS" ]]; then
-              git log --pretty=format:'- %s (%h)' "$PREVIOUS..HEAD"
-            else
-              git log --pretty=format:'- %s (%h)' -20
-            fi
-            echo
-          } > RELEASE_NOTES.md
+          git log -20 --pretty=format:'- %s (%h)' > RELEASE_NOTES.md
 
       - name: Create tag
         if: steps.tag.outputs.exists == 'false'
-        shell: bash
         run: |
-          set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git tag -a "${{ steps.version.outputs.version }}" -m "AIOS2 ${{ steps.version.outputs.version }}"
