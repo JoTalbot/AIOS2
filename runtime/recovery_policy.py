@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class RecoveryAction(str, Enum):
@@ -20,6 +20,13 @@ class RecoveryDecision:
     attempt: int
 
 
+@dataclass(frozen=True)
+class EvidenceDecision:
+    status: str
+    reason: str
+    result: Any = None
+
+
 class RecoveryPolicy:
     """Deterministic recovery policy, safe to evaluate repeatedly."""
 
@@ -34,3 +41,12 @@ class RecoveryPolicy:
         if attempt >= self.max_attempts:
             return RecoveryDecision(execution_id, RecoveryAction.MANUAL_REVIEW, reason or "maximum recovery attempts reached", attempt)
         return RecoveryDecision(execution_id, RecoveryAction.RETRY, reason or "resumable execution", attempt)
+
+    def decide_evidence(self, journal_record: Optional[Any]) -> EvidenceDecision:
+        """Finalize only from durable terminal evidence; otherwise remain ambiguous."""
+        if journal_record is None:
+            return EvidenceDecision("ambiguous", "no_durable_evidence")
+        status = getattr(journal_record, "status", None)
+        if status not in {"completed", "failed"}:
+            return EvidenceDecision("ambiguous", "terminal_evidence_missing")
+        return EvidenceDecision(status, "durable_terminal_evidence", getattr(journal_record, "result", None))

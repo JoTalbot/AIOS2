@@ -44,3 +44,42 @@ async def test_recovery_manager_can_fail_fast(tmp_path):
         async def resume(self, execution_id, agent, context=None): raise RuntimeError("boom")
     with pytest.raises(RuntimeError, match="boom"): await RecoveryManager(store).recover(BrokenLoop(), "agent", continue_on_error=False)
     assert store.get(state.execution_id).status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_recovery_manager_fails_closed_if_lease_is_fenced_after_resume(tmp_path):
+    store = ExecutionStore(str(tmp_path / "executions.json"))
+    store.save(ExecutionState("e1", status="running"))
+
+    class FencedLease:
+        def __init__(self): self.checks = 0
+        def acquire(self, execution_id, owner): return type("Lease", (), {"fencing_token": 9})()
+        def is_owner(self, execution_id, owner, fencing_token):
+            self.checks += 1
+            return self.checks == 1
+        def release(self, execution_id, owner, fencing_token): return True
+
+    class Loop:
+        async def resume(self, execution_id, agent, context=None): return "ok"
+
+    results = await RecoveryManager(
+        store, lease_store=FencedLease(), owner_id="runtime-a"
+    ).recover(Loop(), "agent")
+    assert [r.as_dict() for r in results] == [{"execution_id": "e1", "status": "stale"}]
+    assert store.get("e1").status == "running"
+
+
+def test_recovery_manager_failure_cas_is_fenced(tmp_path):
+    store = ExecutionStore(str(tmp_path / "executions.json"))
+    state = store.save(ExecutionState("e1", status="running"))
+
+    class Lease:
+        fencing_token = 3
+        def is_owner(self, execution_id, owner, fencing_token): return True
+
+    lease_store = Lease()
+    updated = RecoveryManager(store, lease_store=lease_store, owner_id="runtime-a").mark_failed(
+        state, RuntimeError("crash"), lease=lease_store
+    )
+    assert updated.status == "failed"
+    assert store.get("e1").status == "failed"

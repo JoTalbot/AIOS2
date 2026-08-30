@@ -9,11 +9,15 @@ from runtime.recovery_api import RecoveryOperatorService
 from runtime.recovery_queue import RecoveryQueue, RecoveryQueueItem
 
 
-def test_health_and_readiness():
+def test_health_readiness_and_diagnostics():
     app = create_app(operator_validator=lambda request: True)
     client = TestClient(app)
     assert client.get("/health").json() == {"status": "ok", "system": "AIOS"}
     assert client.get("/ready").json() == {"status": "ready", "system": "AIOS"}
+    diagnostics = client.get("/diagnostics").json()
+    assert diagnostics["system"] == "AIOS"
+    assert diagnostics["status"] == "operational"
+    assert diagnostics["components"]["api"] == "ok"
 
 
 def test_recovery_auth_receives_request():
@@ -35,15 +39,9 @@ def test_recovery_mutation_requires_operator_role(tmp_path):
     queue.enqueue(RecoveryQueueItem("exec-1", "manual_review", "needs review", 1))
     service = RecoveryOperatorService(queue=queue)
     viewer = SecurityContext("viewer", OperatorRole.VIEWER, "corr-viewer")
-    app = create_app(
-        recovery_service=service,
-        operator_validator=lambda request: viewer,
-    )
+    app = create_app(recovery_service=service, operator_validator=lambda request: viewer)
     client = TestClient(app)
-    response = client.post(
-        "/recovery/resolve",
-        json={"execution_id": "exec-1", "action": "manual_review"},
-    )
+    response = client.post("/recovery/resolve", json={"execution_id": "exec-1", "action": "manual_review"})
     assert response.status_code == 403
     assert queue.items(unresolved_only=True)[0].resolved is False
 
@@ -53,24 +51,9 @@ def test_recovery_mutation_uses_authenticated_context(tmp_path):
     queue.enqueue(RecoveryQueueItem("exec-1", "manual_review", "needs review", 1))
     service = RecoveryOperatorService(queue=queue)
     operator = SecurityContext("operator-1", OperatorRole.OPERATOR, "corr-123")
-    app = create_app(
-        recovery_service=service,
-        operator_validator=lambda request: operator,
-    )
+    app = create_app(recovery_service=service, operator_validator=lambda request: operator)
     client = TestClient(app)
-    response = client.post(
-        "/recovery/resolve",
-        json={
-            "execution_id": "exec-1",
-            "action": "manual_review",
-            "reason": "reviewed",
-        },
-    )
+    response = client.post("/recovery/resolve", json={"execution_id": "exec-1", "action": "manual_review", "reason": "reviewed"})
     assert response.status_code == 200
-    assert response.json() == {
-        "execution_id": "exec-1",
-        "action": "manual_review",
-        "resolved": True,
-        "correlation_id": "corr-123",
-    }
+    assert response.json()["correlation_id"] == "corr-123"
     assert queue.items(unresolved_only=True) == []

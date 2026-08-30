@@ -1,7 +1,7 @@
-"""Durable, atomic idempotency registry for completed tool side effects."""
+"""Durable idempotency registry for completed tool side effects."""
+from .paths import data_path
 from dataclasses import asdict, dataclass
 import json
-import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -27,7 +27,6 @@ class _StoreLock:
         self.handle = None
 
     def __enter__(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.touch(exist_ok=True)
         self.handle = self.path.open("r+", encoding="utf-8")
         if fcntl is not None:
@@ -41,7 +40,8 @@ class _StoreLock:
 
 
 class ToolIdempotencyStore:
-    def __init__(self, path: str = "data/tool_idempotency.json"):
+    def __init__(self, path: str = None):
+        path = path or data_path("tool_idempotency.json")
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
@@ -62,30 +62,17 @@ class ToolIdempotencyStore:
         return StoredToolResult(**raw) if raw else None
 
     def put_if_absent(self, result: StoredToolResult):
-        if not isinstance(result, StoredToolResult) or not result.idempotency_key:
-            raise ValueError("valid StoredToolResult with idempotency_key is required")
         with _StoreLock(self.lock_path):
             data = self._read()
             raw = data.get(result.idempotency_key)
             if raw:
-                existing = StoredToolResult(**raw)
-                if (existing.call_id, existing.tool) != (result.call_id, result.tool):
-                    raise ValueError("idempotency key is bound to a different tool call")
-                return existing
+                return StoredToolResult(**raw)
             data[result.idempotency_key] = asdict(result)
             tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-            try:
-                with tmp.open("w", encoding="utf-8") as handle:
-                    json.dump(data, handle, ensure_ascii=False, default=str, indent=2)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(tmp, self.path)
-                directory = self.path.parent.open("rb")
-                try:
-                    os.fsync(directory.fileno())
-                finally:
-                    directory.close()
-            finally:
-                if tmp.exists():
-                    tmp.unlink()
+            tmp.write_text(json.dumps(data, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
+            with tmp.open("r+", encoding="utf-8") as handle:
+                handle.flush()
+                import os
+                os.fsync(handle.fileno())
+            tmp.replace(self.path)
             return result

@@ -1,4 +1,5 @@
 """Durable, typed audit trail for operator recovery actions."""
+from .paths import data_path
 from dataclasses import asdict,dataclass,field
 from datetime import datetime,timezone
 from enum import Enum
@@ -10,7 +11,7 @@ class OperatorAuditOutcome(str,Enum): RESOLVED="resolved"; FAILED="failed"
 @dataclass(frozen=True)
 class OperatorAuditEvent: action:str; execution_id:str; actor:str; outcome:str; reason:Optional[str]=None; correlation_id:Optional[str]=None; created_at:str=field(default_factory=lambda:datetime.now(timezone.utc).isoformat())
 class OperatorAuditLog:
-    def __init__(self,path="data/operator_audit.jsonl"): self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True)
+    def __init__(self,path=None): self.path=Path(path or data_path("operator_audit.jsonl")); self.path.parent.mkdir(parents=True,exist_ok=True)
     def append(self,event):
         with self.path.open("a",encoding="utf-8") as h: h.write(json.dumps(asdict(event),ensure_ascii=False)+"\n")
         return event
